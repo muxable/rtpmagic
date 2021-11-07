@@ -23,7 +23,7 @@ type JitterBuffer struct {
 
 // NewJitterBuffer creates a new singular jitter buffer with the given context and delay.
 func NewJitterBuffer(ctx pipeline.Context, delay time.Duration, timestampedPacketIn chan packets.TimestampedPacket) chan packets.TimestampedPacket {
-	timestampedPacketOut := make(chan packets.TimestampedPacket, 16)
+	timestampedPacketOut := make(chan packets.TimestampedPacket)
 	buf := &JitterBuffer{
 		ctx:                  ctx,
 		delay:                delay,

@@ -29,7 +29,7 @@ type Normalizer struct {
 }
 
 func NewNormalizer(ctx pipeline.Context, rtpIn chan rtp.Packet) chan packets.TimestampedPacket {
-	rtpOut := make(chan packets.TimestampedPacket, 16)
+	rtpOut := make(chan packets.TimestampedPacket)
 	n := &Normalizer{
 		ctx:      ctx,
 		sessions: make(map[SSRC]*Session),
@@ -79,10 +79,9 @@ func (n *Normalizer) inputLoop(cancel context.CancelFunc) {
 		// add the ntpDelta to the session's initial timestamp to compute the effective ntp timestamp.
 		ntpTimestamp := session.initialNTPTimestamp.Add(time.Duration(ntpDelta) * time.Second)
 		// create a new packet with the new ntp timestamp and write the new packet to the output channel.
-		log.Printf("writing %v", p)
 		n.rtpOut <- packets.TimestampedPacket{
-			Timestamp: ntpTimestamp,
-			Packet:    p,
+			Timestamp:    ntpTimestamp,
+			Packet:       p,
 		}
 		// update the latest timestamp for the session for the cleanup loop.
 		session.latestNTPTimestamp = ntpTimestamp

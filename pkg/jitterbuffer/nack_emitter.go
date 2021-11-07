@@ -13,7 +13,7 @@ type NackEmitter struct {
 
 // NewNackEmitter creates a new NackEmitter.
 func NewNackEmitter(timestampedPacketIn chan packets.TimestampedPacket) chan []uint16 {
-	nackRangeOut := make(chan []uint16, 16)
+	nackRangeOut := make(chan []uint16)
 	n := &NackEmitter{
 		timestampedPacketIn: timestampedPacketIn,
 		nackRangeOut:        nackRangeOut,

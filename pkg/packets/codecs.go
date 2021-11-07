@@ -8,16 +8,16 @@ type Codec struct {
 
 // CodecSet is a set of codecs for easy access.
 type CodecSet struct {
-	byPayloadType map[byte]*Codec
+	byPayloadType map[byte]Codec
 }
 
 // NewCodecSet creates a new CodecSet for a given list of codecs.
 func NewCodecSet(codecs []Codec) CodecSet {
 	set := CodecSet{
-		byPayloadType: make(map[byte]*Codec),
+		byPayloadType: make(map[byte]Codec),
 	}
 	for _, codec := range codecs {
-		set.byPayloadType[codec.PayloadType] = &codec
+		set.byPayloadType[codec.PayloadType] = codec
 	}
 	return set
 }
@@ -25,5 +25,8 @@ func NewCodecSet(codecs []Codec) CodecSet {
 // FindByPayloadType finds a codec by its payload type.
 func (c CodecSet) FindByPayloadType(payloadType byte) (*Codec, bool) {
 	codec, ok := c.byPayloadType[payloadType]
-	return codec, ok
+	if !ok {
+		return nil, false
+	}
+	return &codec, ok
 }
