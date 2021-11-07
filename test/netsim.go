@@ -1,83 +1,130 @@
 package test
 
 import (
+	"io"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
 )
 
-type NetSimUDPConnConfig struct {
-	NumConnections         uint32
+type SimulatedConnection struct {
 	ReconnectionLikelihood float64
 	ReconnectionPeriod     time.Duration
 	ReconnectionDelay      time.Duration
 	DropRate               float64
-	PacketDelayVariance    time.Duration
+	LatencyMean            time.Duration
+	LatencyVariance        time.Duration
 }
 
 type NetSimUDPConn struct {
-	sync.Mutex
+	sync.RWMutex
 
+	addr              string
 	activeConnections []*net.UDPConn
 	closed            bool
-	config            NetSimUDPConnConfig
+	configs           []*SimulatedConnection
+	readChan          chan []byte 
 }
 
-func NewNetSimUDPConn(addr *net.UDPAddr, config NetSimUDPConnConfig) *NetSimUDPConn {
+func NewNetSimUDPConn(addr string, configs []*SimulatedConnection) (*NetSimUDPConn, error) {
 	n := &NetSimUDPConn{
-		activeConnections: make([]*net.UDPConn, config.NumConnections),
-		config:            config,
+		addr: addr,
+		activeConnections: make([]*net.UDPConn, len(configs)),
+		configs:           configs,
+		readChan:          make(chan []byte),
 	}
 	// reconnection loop.
+	for i, config := range configs {
+		n.reconnect(i)
+		go func(config *SimulatedConnection) {
+			for {
+				time.Sleep(config.ReconnectionPeriod)
+
+				n.Lock()
+				if n.closed {
+					return
+				}
+
+				if rand.Float64() < config.ReconnectionLikelihood {
+					// drop a connection randomly.
+					i := rand.Intn(len(n.activeConnections))
+					if err := n.activeConnections[i].Close(); err != nil {
+						log.Warn().Msgf("failed to close connection: %v", err)
+						continue
+					}
+
+					// wait to reconnect.
+					time.Sleep(config.ReconnectionDelay)
+
+					// then create a new connection.
+					n.reconnect(i)
+				}
+
+				n.Unlock()
+			}
+		}(config)
+	}
+	return n, nil
+}
+
+// reconnect reconnects a specific index.
+func (n *NetSimUDPConn) reconnect(i int) error {
+	parsed, err := net.ResolveUDPAddr("udp", n.addr)
+	if err != nil {
+		return err
+	}
+	c, err := net.DialUDP("udp", nil, parsed)
+	if err != nil {
+		log.Warn().Msgf("failed to reconnect to %s: %v", n.addr, err)
+		return err
+	}
 	go func() {
 		for {
-			time.Sleep(config.ReconnectionPeriod)
-
-			n.Lock()
-			if n.closed {
+			buf := make([]byte, 1500)
+			len, err := c.Read(buf)
+			if err != nil {
+				log.Warn().Msgf("failed to read: %v", err)
 				return
 			}
-
-			if rand.Float64() < config.ReconnectionLikelihood {
-				// drop a connection randomly.
-				i := rand.Intn(len(n.activeConnections))
-				if err := n.activeConnections[i].Close(); err != nil {
-					log.Warn().Msgf("failed to close connection: %v", err)
-					continue
-				}
-
-				// wait to reconnect.
-				time.Sleep(config.ReconnectionDelay)
-
-				// then create a new connection.
-				c, err := net.DialUDP("udp", nil, addr)
-				if err != nil {
-					log.Warn().Msgf("failed to reconnect to %s: %v", addr.String(), err)
-					continue
-				}
-				n.activeConnections[i] = c
-			}
-
-			n.Unlock()
+			n.readChan <- buf[:len]
 		}
 	}()
-	return n
+	n.activeConnections[i] = c
+	return nil
+}
+
+// Read reads from the read channel.
+func (n *NetSimUDPConn) Read(b []byte) (int, error) {
+	buf, ok := <-n.readChan
+	if !ok {
+		return 0, io.EOF
+	}
+	copy(b, buf)
+	return len(buf), nil
 }
 
 func (n *NetSimUDPConn) Write(data []byte) (int, error) {
-	if rand.Float64() < n.config.DropRate {
+	i := rand.Intn(len(n.activeConnections))
+	config := n.configs[i]
+	if rand.Float64() < config.DropRate {
+		// this packet got dropped.
+		p := &rtp.Packet{}
+		p.Unmarshal(data)
 		return len(data), nil
 	}
 	dup := make([]byte, len(data))
 	copy(dup, data)
 	go func() {
-		time.Sleep(time.Duration(rand.ExpFloat64() / float64(n.config.PacketDelayVariance)))
-		// write to a random socket.
-		i := rand.Intn(len(n.activeConnections))
-		n.activeConnections[i].Write(data)
+		time.Sleep(time.Duration(rand.NormFloat64()*1000000)*time.Microsecond*config.LatencyVariance + config.LatencyMean)
+		n.RLock()
+		if _, err := n.activeConnections[i].Write(data); err != nil {
+			log.Warn().Msgf("failed to write: %v", err)
+		}
+		n.RUnlock()
 	}()
 	return len(data), nil
 }
@@ -86,6 +133,7 @@ func (n *NetSimUDPConn) Write(data []byte) (int, error) {
 func (n *NetSimUDPConn) Close() error {
 	n.Lock()
 	defer n.Unlock()
+	close(n.readChan)
 	for _, conn := range n.activeConnections {
 		conn.Close()
 	}

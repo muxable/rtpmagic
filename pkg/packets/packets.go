@@ -8,5 +8,5 @@ import (
 
 type TimestampedPacket struct {
 	Timestamp time.Time
-	Packet    rtp.Packet
+	Packet    *rtp.Packet
 }

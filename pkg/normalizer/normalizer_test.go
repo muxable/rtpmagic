@@ -12,7 +12,7 @@ import (
 )
 
 func TestNormalizer_Simple(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -35,7 +35,7 @@ func TestNormalizer_Simple(t *testing.T) {
 		},
 	}
 
-	in <- p1
+	in <- &p1
 
 	mockClock.Sleep(1 * time.Millisecond)
 
@@ -60,7 +60,7 @@ func TestNormalizer_Simple(t *testing.T) {
 }
 
 func TestNormalizer_MatchesClockRate(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -91,8 +91,8 @@ func TestNormalizer_MatchesClockRate(t *testing.T) {
 		},
 	}
 
-	in <- p1
-	in <- p2
+	in <- &p1
+	in <- &p2
 
 	mockClock.Sleep(1 * time.Millisecond)
 
@@ -127,7 +127,7 @@ func TestNormalizer_MatchesClockRate(t *testing.T) {
 }
 
 func TestNormalizer_SeparateSSRC(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -160,8 +160,8 @@ func TestNormalizer_SeparateSSRC(t *testing.T) {
 		},
 	}
 
-	in <- p1
-	in <- p2
+	in <- &p1
+	in <- &p2
 
 	mockClock.Sleep(1 * time.Millisecond)
 
@@ -196,7 +196,7 @@ func TestNormalizer_SeparateSSRC(t *testing.T) {
 }
 
 func TestNormalizer_CleanupLoop(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -227,11 +227,11 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 		},
 	}
 
-	in <- p1
+	in <- &p1
 
 	mockClock.Sleep(1 * time.Second)
 
-	in <- p2
+	in <- &p2
 
 	mockClock.Sleep(1 * time.Millisecond)
 
@@ -266,7 +266,7 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 }
 
 func TestNormalizer_TooEarly(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -297,8 +297,8 @@ func TestNormalizer_TooEarly(t *testing.T) {
 		},
 	}
 
-	in <- p1
-	in <- p2
+	in <- &p1
+	in <- &p2
 
 	mockClock.Sleep(1 * time.Millisecond)
 
@@ -328,7 +328,7 @@ func TestNormalizer_TooEarly(t *testing.T) {
 }
 
 func TestNormalizer_InvalidPayload(t *testing.T) {
-	in := make(chan rtp.Packet, 10)
+	in := make(chan *rtp.Packet, 10)
 
 	mockClock := clock.New()
 
@@ -351,7 +351,7 @@ func TestNormalizer_InvalidPayload(t *testing.T) {
 		},
 	}
 
-	in <- p1
+	in <- &p1
 
 	mockClock.Sleep(1 * time.Millisecond)
 

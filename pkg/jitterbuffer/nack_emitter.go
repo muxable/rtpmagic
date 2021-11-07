@@ -5,32 +5,34 @@ import (
 )
 
 type NackEmitter struct {
-	timestampedPacketIn chan packets.TimestampedPacket
+	timestampedPacketIn chan *packets.TimestampedPacket
 	lastSequenceNumber  uint16
-	nackRangeOut        chan []uint16
+	nackOut             chan uint16
 	initialized         bool // this prevents the first nack emission.
 }
 
 // NewNackEmitter creates a new NackEmitter.
-func NewNackEmitter(timestampedPacketIn chan packets.TimestampedPacket) chan []uint16 {
-	nackRangeOut := make(chan []uint16)
+func NewNackEmitter(timestampedPacketIn chan *packets.TimestampedPacket) chan uint16 {
+	nackOut := make(chan uint16)
 	n := &NackEmitter{
 		timestampedPacketIn: timestampedPacketIn,
-		nackRangeOut:        nackRangeOut,
+		nackOut:             nackOut,
 	}
 	go n.start()
-	return nackRangeOut
+	return nackOut
 }
 
 // start starts the reading loop.
 func (n *NackEmitter) start() {
-	defer close(n.nackRangeOut)
+	defer close(n.nackOut)
 	for tp := range n.timestampedPacketIn {
 		if tp.Packet.SequenceNumber == n.lastSequenceNumber+1 {
 			n.lastSequenceNumber = tp.Packet.SequenceNumber
 		} else {
 			if n.initialized {
-				n.nackRangeOut <- []uint16{n.lastSequenceNumber + 1, tp.Packet.SequenceNumber - 1}
+				for i := n.lastSequenceNumber + 1; i <= tp.Packet.SequenceNumber-1; i++ {
+					n.nackOut <- i
+				}
 			}
 			n.lastSequenceNumber = tp.Packet.SequenceNumber
 		}

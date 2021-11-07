@@ -10,10 +10,10 @@ import (
 )
 
 type CNAMEDemuxer struct {
-	ctx    pipeline.Context
-	rtpIn  chan *rtp.Packet
-	rtcpIn chan *rtcp.Packet
-	out    chan CNAMESource
+	ctx      pipeline.Context
+	rtpIn    chan *rtp.Packet
+	rtcpIn   chan *rtcp.Packet
+	callback func(*CNAMESource)
 
 	bySSRC  map[uint32]*CNAMESource
 	byCNAME map[string]*CNAMESource
@@ -28,31 +28,27 @@ type CNAMESource struct {
 }
 
 // NewCNAMEDemuxer creates a new CNAMEDemuxer
-func NewCNAMEDemuxer(ctx pipeline.Context, rtpIn chan *rtp.Packet, rtcpIn chan *rtcp.Packet) chan CNAMESource {
-	out := make(chan CNAMESource)
+func NewCNAMEDemuxer(ctx pipeline.Context, rtpIn chan *rtp.Packet, rtcpIn chan *rtcp.Packet, callback func(*CNAMESource)) {
 	d := &CNAMEDemuxer{
-		ctx:     ctx,
-		rtpIn:   rtpIn,
-		rtcpIn:  rtcpIn,
-		out:     out,
-		bySSRC:  make(map[uint32]*CNAMESource),
-		byCNAME: make(map[string]*CNAMESource),
+		ctx:      ctx,
+		rtpIn:    rtpIn,
+		rtcpIn:   rtcpIn,
+		callback: callback,
+		bySSRC:   make(map[uint32]*CNAMESource),
+		byCNAME:  make(map[string]*CNAMESource),
 	}
-	go d.start()
-	return out
-}
 
-// start starts the CNAMEDemuxer
-func (d *CNAMEDemuxer) start() {
 	// if debug mode is on, add a default cname to make testing easier.
 	s := &CNAMESource{
 		CNAME: "mugit",
 		RTP:   make(chan *rtp.Packet),
 		RTCP:  make(chan *rtcp.Packet),
 	}
-	d.out <- *s
+	go d.callback(s)
 	d.byCNAME["mugit"] = s
 
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case p, ok := <-d.rtpIn:
@@ -65,7 +61,7 @@ func (d *CNAMEDemuxer) start() {
 				return
 			}
 			d.handleRTCP(p)
-		case <-d.ctx.Clock.After(time.Second):
+		case <-ticker.C:
 			d.cleanup()
 		}
 	}
@@ -74,6 +70,7 @@ func (d *CNAMEDemuxer) start() {
 // handleRTP checks if the RTP's SSRC is registered and if so, forwards it on to that source
 func (d *CNAMEDemuxer) handleRTP(p *rtp.Packet) {
 	if s, ok := d.bySSRC[p.SSRC]; ok {
+		s.lastPacket = d.ctx.Clock.Now()
 		s.RTP <- p
 	} else {
 		// log.Warn().Uint32("SSRC", p.SSRC).Msg("ssrc received with unknown cname")
@@ -101,7 +98,7 @@ func (d *CNAMEDemuxer) handleRTCP(p *rtcp.Packet) {
 						}
 
 						// notify the pipeline that a new source has been created
-						d.out <- *s
+						go d.callback(s)
 
 						// log a new source
 						log.Info().Str("CNAME", cname).Msg("new cname")

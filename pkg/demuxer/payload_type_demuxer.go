@@ -1,57 +1,73 @@
 package demuxer
 
 import (
-	"strings"
+	"time"
 
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
 )
 
-type PayloadTypeDemuxer struct {
-	ctx   pipeline.Context
-	rtpIn chan *rtp.Packet
+type PayloadTypeSource struct {
+	PayloadType uint8
+	RTP         chan *rtp.Packet
 
-	videoRtpOut chan *rtp.Packet
-	audioRtpOut chan *rtp.Packet
+	lastPacket time.Time
+}
+
+type PayloadTypeDemuxer struct {
+	ctx           pipeline.Context
+	rtpIn         chan *rtp.Packet
+	byPayloadType map[uint8]*PayloadTypeSource
+	callback      func(*PayloadTypeSource)
 }
 
 // NewPayloadTypeDemuxer creates a new PayloadTypeDemuxer
-func NewPayloadTypeDemuxer(ctx pipeline.Context, rtpIn chan *rtp.Packet) (chan *rtp.Packet, chan *rtp.Packet) {
-	videoRtpOut := make(chan *rtp.Packet)
-	audioRtpOut := make(chan *rtp.Packet)
+func NewPayloadTypeDemuxer(ctx pipeline.Context, rtpIn chan *rtp.Packet, callback func(*PayloadTypeSource)) {
 
 	d := &PayloadTypeDemuxer{
-		ctx:         ctx,
-		rtpIn:       rtpIn,
-		videoRtpOut: videoRtpOut,
-		audioRtpOut: audioRtpOut,
+		ctx:           ctx,
+		rtpIn:         rtpIn,
+		byPayloadType: make(map[uint8]*PayloadTypeSource),
+		callback:      callback,
 	}
-	go d.start()
 
-	return videoRtpOut, audioRtpOut
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case p, ok := <-d.rtpIn:
+			if !ok {
+				return
+			}
+
+			s, ok := d.byPayloadType[p.PayloadType]
+			if !ok {
+				s = &PayloadTypeSource{
+					PayloadType: p.PayloadType,
+					RTP:         make(chan *rtp.Packet),
+				}
+				d.byPayloadType[p.PayloadType] = s
+				go d.callback(s)
+			}
+			s.lastPacket = d.ctx.Clock.Now()
+			s.RTP <- p
+		case <-ticker.C:
+			d.cleanup()
+		}
+	}
 }
 
-// start starts processing the input RTP streams.
-func (d *PayloadTypeDemuxer) start() {
-	defer close(d.videoRtpOut)
-	defer close(d.audioRtpOut)
-
-	for pkt := range d.rtpIn {
-		codec, ok := d.ctx.Codecs.FindByPayloadType(pkt.PayloadType)
-		if !ok {
-			log.Warn().Uint8("PayloadType", pkt.PayloadType).Msg("unknown payload type")
-			continue
-		}
-
-		// TODO: assert that the video and audio mime types are consistent, ie no changing payload types.
-		mt := codec.MimeType
-		if strings.HasPrefix(mt, "video") {
-			d.videoRtpOut <- pkt
-		} else if strings.HasPrefix(mt, "audio") {
-			d.audioRtpOut <- pkt
-		} else {
-			log.Warn().Str("MimeType", mt).Msg("unknown mime type")
+// cleanup removes any payload types that have been inactive for a while.
+func (d *PayloadTypeDemuxer) cleanup() {
+	now := d.ctx.Clock.Now()
+	for pt, s := range d.byPayloadType {
+		if now.Sub(s.lastPacket) > 30*time.Second {
+			// log the removal
+			log.Info().Uint8("PayloadType", pt).Msg("removing pt due to timeout")
+			delete(d.byPayloadType, pt)
+			// close the output channels
+			close(s.RTP)
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package sender
 
 import (
+	"sync"
+
 	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -63,10 +65,14 @@ func NewRTPSender(
 		return err
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// Start sending video
 	go func() {
 		buf := samplebuilder.New(10, &codecs.VP8Packet{}, videoCodec.ClockRate)
 		prevSSRC := uint32(0)
+		defer wg.Done()
 		for p := range videoIn {
 			if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
 				// reset the buffer.
@@ -92,6 +98,7 @@ func NewRTPSender(
 	go func() {
 		buf := samplebuilder.New(10, &codecs.OpusPacket{}, audioCodec.ClockRate)
 		prevSSRC := uint32(0)
+		defer wg.Done()
 		for p := range audioIn {
 			if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
 				// reset the buffer.
@@ -111,6 +118,11 @@ func NewRTPSender(
 				}
 			}
 		}
+	}()
+
+	go func() {
+		wg.Wait()
+		peerConnection.Close()
 	}()
 
 	return nil

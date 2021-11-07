@@ -15,84 +15,92 @@ type JitterBuffer struct {
 	ctx                  pipeline.Context
 	delay                time.Duration
 	buffer               []*packets.TimestampedPacket
+	name                 string
 	tail                 uint16
 	count                uint16
-	timestampedPacketIn  chan packets.TimestampedPacket
-	timestampedPacketOut chan packets.TimestampedPacket
+	timestampedPacketIn  chan *packets.TimestampedPacket
+	timestampedPacketOut chan *packets.TimestampedPacket
+	latestTimestamp      time.Time
 }
 
 // NewJitterBuffer creates a new singular jitter buffer with the given context and delay.
-func NewJitterBuffer(ctx pipeline.Context, delay time.Duration, timestampedPacketIn chan packets.TimestampedPacket) chan packets.TimestampedPacket {
-	timestampedPacketOut := make(chan packets.TimestampedPacket)
+func NewJitterBuffer(ctx pipeline.Context, name string, delay time.Duration, timestampedPacketIn chan *packets.TimestampedPacket) chan *packets.TimestampedPacket {
+	timestampedPacketOut := make(chan *packets.TimestampedPacket)
 	buf := &JitterBuffer{
 		ctx:                  ctx,
 		delay:                delay,
+		name:                 name,
 		buffer:               make([]*packets.TimestampedPacket, math.MaxUint16+1),
 		timestampedPacketIn:  timestampedPacketIn,
 		timestampedPacketOut: timestampedPacketOut,
+		latestTimestamp:      ctx.Clock.Now(),
 	}
 	go buf.start()
 	return timestampedPacketOut
 }
 
-func (r *JitterBuffer) start() {
-	defer close(r.timestampedPacketOut)
+func (jb *JitterBuffer) start() {
+	defer close(jb.timestampedPacketOut)
 	for {
-		if r.count == 0 {
+		if jb.count == 0 {
 			// the jitterbuffer is empty, so wait for a new packet and insert it directly into the buffer.
-			p, ok := <-r.timestampedPacketIn
+			p, ok := <-jb.timestampedPacketIn
 			if !ok {
 				return
 			}
+			emitTimestamp := p.Timestamp.Add(jb.delay)
+			if emitTimestamp.Before(time.Now()) {
+				log.Warn().Msgf("jitterbuffer: packet %d is too late", p.Packet.SequenceNumber)
+				jb.timestampedPacketOut <- p
+				break
+			}
 
-			r.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
+			jb.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
 				Packet:    p.Packet,
-				Timestamp: p.Timestamp.Add(r.delay),
+				Timestamp: emitTimestamp,
 			}
 
 			// set the tail pointer.
-			r.tail = p.Packet.SequenceNumber
-			r.count++
-		} else if t := r.buffer[r.tail]; t != nil {
+			jb.tail = p.Packet.SequenceNumber
+			jb.count++
+		} else if t := jb.buffer[jb.tail]; t != nil {
 			select {
-			case p, ok := <-r.timestampedPacketIn:
+			case p, ok := <-jb.timestampedPacketIn:
 				if !ok {
 					return
 				}
 
 				// check if the timestamp is to be emitted in the future. if it isn't, then it's too late
 				// and emitting it will violate the output invariant.
-				emitTimestamp := p.Timestamp.Add(r.delay)
+				emitTimestamp := p.Timestamp.Add(jb.delay)
 				if emitTimestamp.Before(time.Now()) {
 					log.Warn().Msgf("jitterbuffer: packet %d is too late", p.Packet.SequenceNumber)
+					jb.timestampedPacketOut <- p
 					break
 				}
 				// check if this packet is going to be emitted before the tail. if it is, then reset the tail
 				// to the incoming packet.
-				if r.buffer[p.Packet.SequenceNumber] == nil {
-					r.count++
+				if jb.buffer[p.Packet.SequenceNumber] == nil {
+					jb.count++
 				} else {
 					// this is a duplicate packet.
 					log.Info().Msgf("duplicate packet %d received", p.Packet.SequenceNumber)
 					break
 				}
-				r.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
+				jb.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
 					Packet:    p.Packet,
 					Timestamp: emitTimestamp,
 				}
-				if emitTimestamp.Before(t.Timestamp) || (emitTimestamp == t.Timestamp && p.Packet.SequenceNumber < r.tail) {
-					r.tail = p.Packet.SequenceNumber
-				}
-				break
-			case <-r.ctx.Clock.After(t.Timestamp.Sub(r.ctx.Clock.Now())):
+			case <-jb.ctx.Clock.After(t.Timestamp.Sub(jb.ctx.Clock.Now())):
 				// broadcast the packet at the tail.
-				r.timestampedPacketOut <- *t
-				r.buffer[r.tail] = nil
-				r.tail++
-				r.count--
-				if r.count > 0 {
-					for r.buffer[r.tail] == nil {
-						r.tail++
+				jb.timestampedPacketOut <- t
+				jb.latestTimestamp = t.Timestamp
+				jb.buffer[jb.tail] = nil
+				jb.tail++
+				jb.count--
+				if jb.count > 0 {
+					for jb.buffer[jb.tail] == nil {
+						jb.tail++
 					}
 				}
 			}

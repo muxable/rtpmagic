@@ -24,12 +24,12 @@ type Normalizer struct {
 	sessions          map[SSRC]*Session
 	sessionsLock      sync.Mutex
 	sessionExpiration time.Duration
-	rtpIn             chan rtp.Packet
-	rtpOut            chan packets.TimestampedPacket
+	rtpIn             chan *rtp.Packet
+	rtpOut            chan *packets.TimestampedPacket
 }
 
-func NewNormalizer(ctx pipeline.Context, rtpIn chan rtp.Packet) chan packets.TimestampedPacket {
-	rtpOut := make(chan packets.TimestampedPacket)
+func NewNormalizer(ctx pipeline.Context, rtpIn chan *rtp.Packet) chan *packets.TimestampedPacket {
+	rtpOut := make(chan *packets.TimestampedPacket)
 	n := &Normalizer{
 		ctx:      ctx,
 		sessions: make(map[SSRC]*Session),
@@ -77,9 +77,9 @@ func (n *Normalizer) inputLoop(cancel context.CancelFunc) {
 		// divide by the clock rate to convert to ntp delta.
 		ntpDelta := float64(delta) / float64(codec.ClockRate)
 		// add the ntpDelta to the session's initial timestamp to compute the effective ntp timestamp.
-		ntpTimestamp := session.initialNTPTimestamp.Add(time.Duration(ntpDelta) * time.Second)
+		ntpTimestamp := session.initialNTPTimestamp.Add(time.Duration(ntpDelta * 1000000) * time.Microsecond)
 		// create a new packet with the new ntp timestamp and write the new packet to the output channel.
-		n.rtpOut <- packets.TimestampedPacket{
+		n.rtpOut <- &packets.TimestampedPacket{
 			Timestamp:    ntpTimestamp,
 			Packet:       p,
 		}

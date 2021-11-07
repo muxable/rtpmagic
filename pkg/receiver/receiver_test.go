@@ -20,7 +20,7 @@ func TestReceiver_Simple(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan rtcp.Packet)
+	rtcpReturn := make(chan *rtcp.Packet)
 	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestReceiver_MultipleConnections(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan rtcp.Packet)
+	rtcpReturn := make(chan *rtcp.Packet)
 	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestReceiver_WritesRTCP(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan rtcp.Packet, 10)
+	rtcpReturn := make(chan *rtcp.Packet, 10)
 	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestReceiver_WritesRTCP(t *testing.T) {
 	// send some rtp packets.
 	p1 := rtp.Packet{Header: rtp.Header{SequenceNumber: 1, SSRC: 0xbc5e9a40}}
 
-	rtcp1 := &rtcp.ReceiverReport{
+	rtcp1 := rtcp.ReceiverReport{
 		SSRC: 0x902f9e2e,
 		Reports: []rtcp.ReceptionReport{{
 			SSRC:               0xbc5e9a40,
@@ -208,7 +208,8 @@ func TestReceiver_WritesRTCP(t *testing.T) {
 	}
 
 	// send the rtcp packet
-	rtcpReturn <- rtcp1
+	p := rtcp.Packet(&rtcp1)
+	rtcpReturn <- &p
 
 	// check the rtcp packet was received.
 	b3 := make([]byte, 1500)

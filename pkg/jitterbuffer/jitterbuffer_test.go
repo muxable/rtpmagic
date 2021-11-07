@@ -13,7 +13,7 @@ import (
 
 func newJitterBufferPacket(ts time.Time, seq uint16) packets.TimestampedPacket {
 	return packets.TimestampedPacket{
-		Packet: rtp.Packet{
+		Packet: &rtp.Packet{
 			Header: rtp.Header{
 				SequenceNumber: seq,
 			},
@@ -23,18 +23,18 @@ func newJitterBufferPacket(ts time.Time, seq uint16) packets.TimestampedPacket {
 }
 
 func TestJitterBuffer_Simple(t *testing.T) {
-	in := make(chan packets.TimestampedPacket, 10)
+	in := make(chan *packets.TimestampedPacket, 10)
 
 	mockClock := clock.New()
 
 	out := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
-	}, 100*time.Millisecond, in)
+	}, "debug", 100*time.Millisecond, in)
 
 	p1 := newJitterBufferPacket(mockClock.Now(), 100)
 
-	in <- p1
+	in <- &p1
 
 	select {
 	case <-out:
@@ -66,22 +66,22 @@ func TestJitterBuffer_Simple(t *testing.T) {
 }
 
 func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
-	in := make(chan packets.TimestampedPacket, 10)
+	in := make(chan *packets.TimestampedPacket, 10)
 
 	mockClock := clock.New()
 
 	out := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
-	}, 100*time.Millisecond, in)
+	}, "debug", 100*time.Millisecond, in)
 
 	ts := mockClock.Now()
 
 	p1 := newJitterBufferPacket(ts, 100)
 	p2 := newJitterBufferPacket(ts, 101)
 
-	in <- p2
-	in <- p1
+	in <- &p2
+	in <- &p1
 
 	select {
 	case <-out:
@@ -118,14 +118,14 @@ func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
 }
 
 func TestJitterBuffer_Deduplicates(t *testing.T) {
-	in := make(chan packets.TimestampedPacket, 10)
+	in := make(chan *packets.TimestampedPacket, 10)
 
 	mockClock := clock.New()
 
 	out := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
-	}, 100*time.Millisecond, in)
+	}, "debug", 100*time.Millisecond, in)
 
 	ts := mockClock.Now()
 
@@ -133,9 +133,9 @@ func TestJitterBuffer_Deduplicates(t *testing.T) {
 	p2 := newJitterBufferPacket(ts, 101)
 	p3 := newJitterBufferPacket(ts, 100)
 
-	in <- p1
-	in <- p2
-	in <- p3
+	in <- &p1
+	in <- &p2
+	in <- &p3
 
 	select {
 	case <-out:
@@ -172,14 +172,14 @@ func TestJitterBuffer_Deduplicates(t *testing.T) {
 }
 
 func TestJitterBuffer_LotsOfPackets(t *testing.T) {
-	in := make(chan packets.TimestampedPacket, 10)
+	in := make(chan *packets.TimestampedPacket, 10)
 
 	mockClock := clock.New()
 
 	out := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
-	}, 100*time.Millisecond, in)
+	}, "debug", 100*time.Millisecond, in)
 
 	t0 := mockClock.Now()
 	t1 := t0.Add(50 * time.Millisecond)
@@ -193,14 +193,14 @@ func TestJitterBuffer_LotsOfPackets(t *testing.T) {
 	p7 := newJitterBufferPacket(t1, 104)
 	p8 := newJitterBufferPacket(t1, 107)
 
-	in <- p1
-	in <- p2
-	in <- p3
-	in <- p4
-	in <- p5
-	in <- p6
-	in <- p7
-	in <- p8
+	in <- &p1
+	in <- &p2
+	in <- &p3
+	in <- &p4
+	in <- &p5
+	in <- &p6
+	in <- &p7
+	in <- &p8
 
 	select {
 	case <-out:
@@ -272,22 +272,22 @@ func TestJitterBuffer_LotsOfPackets(t *testing.T) {
 }
 
 func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
-	in := make(chan packets.TimestampedPacket, 10)
+	in := make(chan *packets.TimestampedPacket, 10)
 
 	mockClock := clock.New()
 
 	out := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
-	}, 100*time.Millisecond, in)
+	}, "debug", 100*time.Millisecond, in)
 
 	ts := mockClock.Now()
 
 	p1 := newJitterBufferPacket(ts, 102)
 	p2 := newJitterBufferPacket(ts.Add(-101*time.Millisecond), 101)
 
-	in <- p1
-	in <- p2
+	in <- &p1
+	in <- &p2
 
 	select {
 	case <-out:
