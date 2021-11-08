@@ -34,39 +34,18 @@ func main() {
 			{PayloadType: 96, MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
 			{PayloadType: 111, MimeType: webrtc.MimeTypeOpus, ClockRate: 48000},
 		}),
-		Clock: clock.New(),
-	SenderSSRC : rand.Uint32(),
+		Clock:      clock.New(),
+		SenderSSRC: rand.Uint32(),
 	}
 	rtcpReturn := make(chan rtcp.CompoundPacket)
 
-	log.Info().Msg("listening")
-
 	// receive inbound packets.
-	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, "0.0.0.0:5000", 200 * time.Millisecond, rtcpReturn)
+	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, "0.0.0.0:5000", 200*time.Millisecond, rtcpReturn)
 	if err != nil {
 		panic(err)
 	}
 
 	demuxer.NewCNAMEDemuxer(ctx, rtpIn, rtcpIn, func(cnameSource *demuxer.CNAMESource) {
-		videoRtp := make(chan *rtp.Packet)
-		audioRtp := make(chan *rtp.Packet)
-
-		defer close(videoRtp)
-		defer close(audioRtp)
-
-		if err := sender.NewRTPSender(
-			"34.72.248.242:50051", cnameSource.CNAME,
-			webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeVP8,
-				ClockRate: 90000,
-			},
-			webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeOpus,
-				ClockRate: 48000,
-			},
-			videoRtp, audioRtp); err != nil {
-			panic(err)
-		}
 
 		demuxer.NewSSRCDemuxer(ctx, cnameSource.RTP, cnameSource.RTCP, func(ssrcSource *demuxer.SSRCSource) {
 			jb, nack := jitterbuffer.NewCompositeJitterBuffer(ctx, ssrcSource.RTP, []time.Duration{250 * time.Millisecond, 250 * time.Millisecond}, 350*time.Millisecond)
@@ -82,6 +61,12 @@ func main() {
 				}
 			}()
 			demuxer.NewPayloadTypeDemuxer(ctx, jb, func(payloadTypeSource *demuxer.PayloadTypeSource) {
+				videoRtp := make(chan *rtp.Packet)
+				audioRtp := make(chan *rtp.Packet)
+
+				defer close(videoRtp)
+				defer close(audioRtp)
+				
 				// match with a codec.
 				codec, ok := ctx.Codecs.FindByPayloadType(payloadTypeSource.PayloadType)
 				if !ok {
@@ -91,6 +76,21 @@ func main() {
 					}
 					return
 				}
+
+				if err := sender.NewRTPSender(
+					"34.72.248.242:50051", cnameSource.CNAME, ssrcSource.SSRC,
+					webrtc.RTPCodecCapability{
+						MimeType:  webrtc.MimeTypeVP8,
+						ClockRate: 90000,
+					},
+					webrtc.RTPCodecCapability{
+						MimeType:  webrtc.MimeTypeOpus,
+						ClockRate: 48000,
+					},
+					videoRtp, audioRtp); err != nil {
+					panic(err)
+				}
+
 				for p := range payloadTypeSource.RTP {
 					if strings.HasPrefix(codec.MimeType, "video") {
 						videoRtp <- p

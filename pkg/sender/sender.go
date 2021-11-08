@@ -1,6 +1,7 @@
 package sender
 
 import (
+	"fmt"
 	"sync"
 
 	sdk "github.com/pion/ion-sdk-go"
@@ -25,10 +26,11 @@ var e = sdk.NewEngine(sdk.Config{
 })
 
 func NewRTPSender(
-	addr string, cname string,
+	addr string, cname string, ssrc uint32,
 	videoCodec webrtc.RTPCodecCapability, audioCodec webrtc.RTPCodecCapability,
 	videoIn chan *rtp.Packet, audioIn chan *rtp.Packet) error {
-	c, err := sdk.NewClient(e, addr, cname)
+	uid := fmt.Sprintf("%s-%d", cname, ssrc)
+	c, err := sdk.NewClient(e, addr, uid)
 	if err != nil {
 		return err
 	}
@@ -40,7 +42,7 @@ func NewRTPSender(
 	})
 
 	// Create a video track
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(videoCodec, "video", "pion")
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(videoCodec, fmt.Sprintf("%s-video", uid), uid)
 	if err != nil {
 		return err
 	}
@@ -51,7 +53,7 @@ func NewRTPSender(
 	go processRTCP(rtpSender)
 
 	// Create a video track
-	audioTrack, err := webrtc.NewTrackLocalStaticSample(audioCodec, "audio", "pion")
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(audioCodec, fmt.Sprintf("%s-audio", uid), uid)
 	if err != nil {
 		return err
 	}
@@ -95,20 +97,14 @@ func codecToDepacketizer(codec webrtc.RTPCodecCapability) rtp.Depacketizer {
 	case webrtc.MimeTypeOpus:
 		return &codecs.OpusPacket{}
 	default:
+		log.Warn().Str("MimeType", codec.MimeType).Msg("unsupported codec")
 		return nil
 	}
 }
 
 func rtpToTrack(rtpIn chan *rtp.Packet, track *webrtc.TrackLocalStaticSample, codec webrtc.RTPCodecCapability) {
 	buf := samplebuilder.New(10, codecToDepacketizer(codec), codec.ClockRate)
-	prevSSRC := uint32(0)
 	for p := range rtpIn {
-		if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
-			// reset the buffer.
-			log.Warn().Uint32("PrevSSRC", prevSSRC).Uint32("NextSSRC", p.Header.SSRC).Msg("sample buffer reset due to SSRC change")
-			buf = samplebuilder.New(10, &codecs.OpusPacket{}, codec.ClockRate)
-		}
-		prevSSRC = p.Header.SSRC
 		buf.Push(p)
 		for {
 			sample := buf.Pop()

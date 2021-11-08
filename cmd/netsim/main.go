@@ -16,7 +16,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	out, err := test.NewNetSimUDPConn("172.25.228.93:5000", []*test.SimulatedConnection{
+	out, err := test.NewNetSimUDPConn("127.0.0.1:5000", []*test.SimulatedConnection{
 		{
 			DropRate: 0.10,
 		},
