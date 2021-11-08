@@ -65,16 +65,8 @@ func TestNackEmitter_MissingSingle(t *testing.T) {
 
 	in <- &p2
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
-	val2 := <-out
-	if val1 != 101 || val2 != 101 {
+	if val1 != 101 {
 		t.Errorf("expected [101 101], got %v", val1)
 		return
 	}
@@ -104,13 +96,6 @@ func TestNackEmitter_MissingRange(t *testing.T) {
 	}
 
 	in <- &p2
-
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
 
 	val1 := <-out
 	val2 := <-out
@@ -144,11 +129,6 @@ func TestNackEmitter_MissingTwoBlocks(t *testing.T) {
 	in <- &p3
 
 	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) != 2 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
 
 	val1 := <-out
 	val2 := <-out

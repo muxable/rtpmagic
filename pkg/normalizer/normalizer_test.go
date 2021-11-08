@@ -12,7 +12,11 @@ import (
 )
 
 func TestNormalizer_Simple(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -37,13 +41,6 @@ func TestNormalizer_Simple(t *testing.T) {
 
 	in <- &p1
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.SequenceNumber {
 		t.Errorf("expected packet to be equal")
@@ -53,14 +50,14 @@ func TestNormalizer_Simple(t *testing.T) {
 		t.Errorf("expected timestamp to be equal but was %v", time.Since(val1.Timestamp))
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestNormalizer_MatchesClockRate(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -94,13 +91,6 @@ func TestNormalizer_MatchesClockRate(t *testing.T) {
 	in <- &p1
 	in <- &p2
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.SequenceNumber {
 		t.Errorf("expected packet to be equal, got %d want %d", val1.Packet.SequenceNumber, p1.SequenceNumber)
@@ -120,14 +110,14 @@ func TestNormalizer_MatchesClockRate(t *testing.T) {
 		t.Errorf("expected timestamp to be equal but was %v", time.Since(val2.Timestamp))
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestNormalizer_SeparateSSRC(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -163,13 +153,6 @@ func TestNormalizer_SeparateSSRC(t *testing.T) {
 	in <- &p1
 	in <- &p2
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.SequenceNumber {
 		t.Errorf("expected packet to be equal")
@@ -189,14 +172,14 @@ func TestNormalizer_SeparateSSRC(t *testing.T) {
 		t.Errorf("expected timestamp to be equal but was %v", time.Since(val2.Timestamp))
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestNormalizer_CleanupLoop(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -233,13 +216,6 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 
 	in <- &p2
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.SequenceNumber {
 		t.Errorf("expected packet to be equal")
@@ -259,14 +235,14 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 		t.Errorf("expected timestamp to be equal but was %v", time.Since(val2.Timestamp))
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestNormalizer_TooEarly(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -300,13 +276,6 @@ func TestNormalizer_TooEarly(t *testing.T) {
 	in <- &p1
 	in <- &p2
 
-	mockClock.Sleep(1 * time.Millisecond)
-
-	if len(out) == 0 {
-		t.Errorf("expected non-empty out channel")
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.SequenceNumber {
 		t.Errorf("expected packet to be equal")
@@ -321,14 +290,14 @@ func TestNormalizer_TooEarly(t *testing.T) {
 		t.Errorf("expected empty out channel")
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestNormalizer_InvalidPayload(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *rtp.Packet, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -359,8 +328,4 @@ func TestNormalizer_InvalidPayload(t *testing.T) {
 		t.Errorf("expected empty out channel")
 		return
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }

@@ -7,6 +7,7 @@ import (
 
 // Context is a context for a pipeline.
 type Context struct {
-	Codecs packets.CodecSet
-	Clock  clock.Clock
+	Codecs     packets.CodecSet
+	Clock      clock.Clock
+	SenderSSRC uint32
 }

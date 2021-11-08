@@ -35,15 +35,14 @@ func main() {
 			{PayloadType: 111, MimeType: webrtc.MimeTypeOpus, ClockRate: 48000},
 		}),
 		Clock: clock.New(),
+	SenderSSRC : rand.Uint32(),
 	}
-	rtcpReturn := make(chan *rtcp.Packet)
-
-	senderSSRC := rand.Uint32()
+	rtcpReturn := make(chan rtcp.CompoundPacket)
 
 	log.Info().Msg("listening")
 
 	// receive inbound packets.
-	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, "0.0.0.0:5000", rtcpReturn)
+	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, "0.0.0.0:5000", 200 * time.Millisecond, rtcpReturn)
 	if err != nil {
 		panic(err)
 	}
@@ -75,12 +74,11 @@ func main() {
 				for n := range nack {
 					p := rtcp.TransportLayerNack{
 						MediaSSRC:  ssrcSource.SSRC,
-						SenderSSRC: senderSSRC,
+						SenderSSRC: ctx.SenderSSRC,
 						Nacks:      n,
 					}
 					log.Printf("sending nack %v", p)
-					q := rtcp.Packet(&p)
-					rtcpReturn <- &q
+					rtcpReturn <- rtcp.CompoundPacket{&p}
 				}
 			}()
 			demuxer.NewPayloadTypeDemuxer(ctx, jb, func(payloadTypeSource *demuxer.PayloadTypeSource) {

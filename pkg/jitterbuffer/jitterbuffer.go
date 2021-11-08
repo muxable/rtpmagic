@@ -39,73 +39,57 @@ func NewJitterBuffer(ctx pipeline.Context, name string, delay time.Duration, tim
 	return timestampedPacketOut
 }
 
+// getMid returns the index of the next non-nil packet searching from the tail.
+func (jb *JitterBuffer) getMid() (*packets.TimestampedPacket, <-chan time.Time) {
+	if jb.count == 0 { // this should never happen.
+		return nil, make(chan time.Time)
+	}
+	for i := jb.tail; ; i++ {
+		if p := jb.buffer[i]; p != nil {
+			return p, jb.ctx.Clock.After(p.Timestamp.Sub(jb.ctx.Clock.Now()))
+		}
+	}
+}
+
 func (jb *JitterBuffer) start() {
 	defer close(jb.timestampedPacketOut)
 	for {
-		if jb.count == 0 {
-			// the jitterbuffer is empty, so wait for a new packet and insert it directly into the buffer.
-			p, ok := <-jb.timestampedPacketIn
+		// there's at least one packet in the future, so find it and wait for it.
+		// this packet is called the mid.
+		mid, after := jb.getMid()
+		select {
+		case p, ok := <-jb.timestampedPacketIn:
 			if !ok {
 				return
 			}
+
+			// check if the timestamp is to be emitted in the future. if it isn't, then it's too late
+			// and emitting it will violate the output invariant.
 			emitTimestamp := p.Timestamp.Add(jb.delay)
-			if emitTimestamp.Before(time.Now()) {
+			if emitTimestamp.Before(jb.latestTimestamp) {
 				log.Warn().Msgf("jitterbuffer: packet %d is too late", p.Packet.SequenceNumber)
 				jb.timestampedPacketOut <- p
 				break
 			}
-
+			if jb.buffer[p.Packet.SequenceNumber] == nil {
+				jb.count++
+			} else {
+				// this is a duplicate packet.
+				log.Info().Msgf("duplicate packet %d received", p.Packet.SequenceNumber)
+				break
+			}
 			jb.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
 				Packet:    p.Packet,
 				Timestamp: emitTimestamp,
 			}
-
-			// set the tail pointer.
-			jb.tail = p.Packet.SequenceNumber
-			jb.count++
-		} else if t := jb.buffer[jb.tail]; t != nil {
-			select {
-			case p, ok := <-jb.timestampedPacketIn:
-				if !ok {
-					return
-				}
-
-				// check if the timestamp is to be emitted in the future. if it isn't, then it's too late
-				// and emitting it will violate the output invariant.
-				emitTimestamp := p.Timestamp.Add(jb.delay)
-				if emitTimestamp.Before(time.Now()) {
-					log.Warn().Msgf("jitterbuffer: packet %d is too late", p.Packet.SequenceNumber)
-					jb.timestampedPacketOut <- p
-					break
-				}
-				// check if this packet is going to be emitted before the tail. if it is, then reset the tail
-				// to the incoming packet.
-				if jb.buffer[p.Packet.SequenceNumber] == nil {
-					jb.count++
-				} else {
-					// this is a duplicate packet.
-					log.Info().Msgf("duplicate packet %d received", p.Packet.SequenceNumber)
-					break
-				}
-				jb.buffer[p.Packet.SequenceNumber] = &packets.TimestampedPacket{
-					Packet:    p.Packet,
-					Timestamp: emitTimestamp,
-				}
-			case <-jb.ctx.Clock.After(t.Timestamp.Sub(jb.ctx.Clock.Now())):
-				// broadcast the packet at the tail.
-				jb.timestampedPacketOut <- t
-				jb.latestTimestamp = t.Timestamp
-				jb.buffer[jb.tail] = nil
-				jb.tail++
-				jb.count--
-				if jb.count > 0 {
-					for jb.buffer[jb.tail] == nil {
-						jb.tail++
-					}
-				}
-			}
-		} else {
-			log.Error().Msg("jitter buffer tail is nil but it contains elements! this is an inconsistent state.")
+		case <-after:
+			// broadcast the packet at the tail.
+			jb.timestampedPacketOut <- mid
+			jb.latestTimestamp = mid.Timestamp
+			jb.buffer[jb.tail] = nil
+			// start future searches after this packet.
+			jb.tail = mid.Packet.SequenceNumber + 1
+			jb.count--
 		}
 	}
 }

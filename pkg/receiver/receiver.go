@@ -1,10 +1,13 @@
 package receiver
 
 import (
+	"context"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/muxable/rtpmagic/pkg/pipeline"
+	"github.com/pion/interceptor/pkg/twcc"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
@@ -17,14 +20,19 @@ type Receiver struct {
 
 	rtpOut     chan *rtp.Packet
 	rtcpOut    chan *rtcp.Packet
-	rtcpReturn chan *rtcp.Packet
+	rtcpReturn chan rtcp.CompoundPacket
 	conn       *net.UDPConn
 
 	sourcesLock sync.RWMutex
 	sources     map[uint32]*net.UDPAddr // maps ssrc to the most recent sender.
+
+	twccRecorders map[int]*twcc.Recorder
+	twccInterval  time.Duration
+	twccContext   context.Context
+	twccCancel    context.CancelFunc
 }
 
-func NewReceiver(ctx pipeline.Context, addr string, rtcpReturn chan *rtcp.Packet) (chan *rtp.Packet, chan *rtcp.Packet, error) {
+func NewReceiver(ctx pipeline.Context, addr string, twccInterval time.Duration, rtcpReturn chan rtcp.CompoundPacket) (chan *rtp.Packet, chan *rtcp.Packet, error) {
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, nil, err
@@ -35,13 +43,18 @@ func NewReceiver(ctx pipeline.Context, addr string, rtcpReturn chan *rtcp.Packet
 	if err != nil {
 		return nil, nil, err
 	}
+	twccContext, twccCancel := context.WithCancel(context.Background())
 	r := &Receiver{
-		ctx:        ctx,
-		rtpOut:     rtpOut,
-		rtcpOut:    rtcpOut,
-		conn:       conn,
-		rtcpReturn: rtcpReturn,
-		sources:    map[uint32]*net.UDPAddr{},
+		ctx:           ctx,
+		rtpOut:        rtpOut,
+		rtcpOut:       rtcpOut,
+		conn:          conn,
+		rtcpReturn:    rtcpReturn,
+		sources:       make(map[uint32]*net.UDPAddr),
+		twccRecorders: make(map[int]*twcc.Recorder),
+		twccInterval:  twccInterval,
+		twccContext:   twccContext,
+		twccCancel:    twccCancel,
 	}
 	go r.forward()
 	go r.reverse()
@@ -77,6 +90,24 @@ func (r *Receiver) forward() {
 			r.sourcesLock.Lock()
 			r.sources[p.SSRC] = sender
 			r.sourcesLock.Unlock()
+			t, ok := r.twccRecorders[sender.Port]
+			if !ok {
+				t = twcc.NewRecorder(r.ctx.SenderSSRC)
+				r.twccRecorders[sender.Port] = t
+				go func() {
+					ticker := time.NewTicker(r.twccInterval)
+					for {
+						select {
+						case <-r.twccContext.Done():
+							ticker.Stop()
+							return
+						case <-ticker.C:
+							r.rtcpReturn <- t.BuildFeedbackPacket()
+						}
+					}
+				}()
+			}
+			t.Record(p.SSRC, p.SequenceNumber, r.ctx.Clock.Now().Unix())
 			r.rtpOut <- p
 		}
 	}
@@ -85,17 +116,17 @@ func (r *Receiver) forward() {
 // reverse sends RTCP packets to the appropriate destination.
 func (r *Receiver) reverse() {
 	defer r.conn.Close()
+	defer r.twccCancel()
 	for p := range r.rtcpReturn {
-		b, err := (*p).Marshal()
+		// Marshalling this as a CompoundPacket requires receiver reports.
+		b, err := rtcp.Marshal([]rtcp.Packet(p))
 		if err != nil {
 			log.Warn().Msgf("failed to marshal rtcp packet: %v", err)
 			continue
 		}
 
-		// TODO: batch packets.
-
 		r.sourcesLock.RLock()
-		for _, ssrcs := range (*p).DestinationSSRC() {
+		for _, ssrcs := range p.DestinationSSRC() {
 			// forward this packet to that ssrc's source.
 			if addr, ok := r.sources[ssrcs]; ok {
 				if _, err := r.conn.WriteToUDP(b, addr); err != nil {

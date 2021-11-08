@@ -22,8 +22,21 @@ func newJitterBufferPacket(ts time.Time, seq uint16) packets.TimestampedPacket {
 	}
 }
 
+func assertNoEmissionsForDuration(t *testing.T, ch chan *packets.TimestampedPacket, d time.Duration) {
+	select {
+	case <-ch:
+		t.Errorf("emission received too early")
+	case <-time.After(95 * time.Millisecond):
+		break
+	}
+}
+
 func TestJitterBuffer_Simple(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *packets.TimestampedPacket, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -44,13 +57,6 @@ func TestJitterBuffer_Simple(t *testing.T) {
 		break
 	}
 
-	mockClock.Sleep(2 * time.Millisecond)
-
-	if len(out) != 1 {
-		t.Errorf("expected one packet in out channel but was %d", len(out))
-		return
-	}
-
 	val1 := <-out
 	if val1.Packet.SequenceNumber != p1.Packet.SequenceNumber {
 		t.Errorf("expected %v, got %v", p1, val1)
@@ -59,14 +65,14 @@ func TestJitterBuffer_Simple(t *testing.T) {
 	if len(out) > 0 {
 		t.Errorf("expected empty emit channel")
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *packets.TimestampedPacket, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -83,13 +89,7 @@ func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
 	in <- &p2
 	in <- &p1
 
-	select {
-	case <-out:
-		t.Errorf("emission received too early")
-		return
-	case <-time.After(95 * time.Millisecond):
-		break
-	}
+	assertNoEmissionsForDuration(t, out, 95*time.Millisecond)
 
 	ts1 := time.Now()
 
@@ -111,14 +111,14 @@ func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
 	if ts2.Sub(ts1) > 10*time.Millisecond {
 		t.Errorf("took too long to emit")
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestJitterBuffer_Deduplicates(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *packets.TimestampedPacket, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -137,13 +137,7 @@ func TestJitterBuffer_Deduplicates(t *testing.T) {
 	in <- &p2
 	in <- &p3
 
-	select {
-	case <-out:
-		t.Errorf("emission received too early")
-		return
-	case <-time.After(95 * time.Millisecond):
-		break
-	}
+	assertNoEmissionsForDuration(t, out, 95*time.Millisecond)
 
 	ts1 := time.Now()
 
@@ -165,14 +159,14 @@ func TestJitterBuffer_Deduplicates(t *testing.T) {
 	if ts2.Sub(ts1) > 10*time.Millisecond {
 		t.Errorf("took too long to emit")
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestJitterBuffer_LotsOfPackets(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *packets.TimestampedPacket, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -265,14 +259,14 @@ func TestJitterBuffer_LotsOfPackets(t *testing.T) {
 	if ts4.Sub(ts3) > 10*time.Millisecond {
 		t.Errorf("took too long to emit")
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }
 
 func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	in := make(chan *packets.TimestampedPacket, 10)
+
+	defer close(in)
 
 	mockClock := clock.New()
 
@@ -290,12 +284,17 @@ func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
 	in <- &p2
 
 	select {
-	case <-out:
-		t.Errorf("emission received too early")
-		return
-	case <-time.After(95 * time.Millisecond):
+	case val2 := <-out:
+		// p2 should be evicted immediately.
+		if val2.Packet.SequenceNumber != p2.Packet.SequenceNumber {
+			t.Errorf("expected %v, got %v", p2, val2)
+		}
+	case <-time.After(1 * time.Millisecond):
+		t.Errorf("expected packet to be evicted")
 		break
 	}
+
+	assertNoEmissionsForDuration(t, out, 95*time.Millisecond)
 
 	ts1 := time.Now()
 
@@ -313,8 +312,4 @@ func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
 	if ts2.Sub(ts1) > 10*time.Millisecond {
 		t.Errorf("took too long to emit")
 	}
-
-	close(in)
-
-	goleak.VerifyNone(t)
 }

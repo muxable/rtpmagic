@@ -4,6 +4,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/muxable/rtpmagic/pkg/packets"
@@ -20,8 +21,8 @@ func TestReceiver_Simple(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan *rtcp.Packet)
-	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
+	rtcpReturn := make(chan rtcp.CompoundPacket)
+	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", 100 * time.Second, rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +88,8 @@ func TestReceiver_MultipleConnections(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan *rtcp.Packet)
-	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
+	rtcpReturn := make(chan rtcp.CompoundPacket)
+	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", 100 * time.Second, rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +160,8 @@ func TestReceiver_WritesRTCP(t *testing.T) {
 		}),
 		Clock: clock.New(),
 	}
-	rtcpReturn := make(chan *rtcp.Packet, 10)
-	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", rtcpReturn)
+	rtcpReturn := make(chan rtcp.CompoundPacket)
+	rtpOut, _, err := NewReceiver(ctx, "0.0.0.0:5738", 100 * time.Second,  rtcpReturn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,8 +209,7 @@ func TestReceiver_WritesRTCP(t *testing.T) {
 	}
 
 	// send the rtcp packet
-	p := rtcp.Packet(&rtcp1)
-	rtcpReturn <- &p
+	rtcpReturn <- rtcp.CompoundPacket{&rtcp1}
 
 	// check the rtcp packet was received.
 	b3 := make([]byte, 1500)

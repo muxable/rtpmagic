@@ -68,56 +68,14 @@ func NewRTPSender(
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Start sending video
 	go func() {
-		buf := samplebuilder.New(10, &codecs.VP8Packet{}, videoCodec.ClockRate)
-		prevSSRC := uint32(0)
-		defer wg.Done()
-		for p := range videoIn {
-			if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
-				// reset the buffer.
-				log.Warn().Uint32("PrevSSRC", prevSSRC).Uint32("NextSSRC", p.Header.SSRC).Str("CNAME", cname).Msg("video sample buffer reset due to SSRC change")
-				buf = samplebuilder.New(10, &codecs.VP8Packet{}, videoCodec.ClockRate)
-			}
-			prevSSRC = p.Header.SSRC
-			buf.Push(p)
-			for {
-				sample := buf.Pop()
-				if sample == nil {
-					break
-				}
-
-				if err := videoTrack.WriteSample(*sample); err != nil {
-					log.Warn().Err(err).Msg("failed to write sample")
-				}
-			}
-		}
+		rtpToTrack(videoIn, videoTrack, videoCodec)
+		wg.Done()
 	}()
 
-	// Start sending audio
 	go func() {
-		buf := samplebuilder.New(10, &codecs.OpusPacket{}, audioCodec.ClockRate)
-		prevSSRC := uint32(0)
-		defer wg.Done()
-		for p := range audioIn {
-			if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
-				// reset the buffer.
-				log.Warn().Uint32("PrevSSRC", prevSSRC).Uint32("NextSSRC", p.Header.SSRC).Str("CNAME", cname).Msg("audio sample buffer reset due to SSRC change")
-				buf = samplebuilder.New(10, &codecs.OpusPacket{}, audioCodec.ClockRate)
-			}
-			prevSSRC = p.Header.SSRC
-			buf.Push(p)
-			for {
-				sample := buf.Pop()
-				if sample == nil {
-					break
-				}
-
-				if err := audioTrack.WriteSample(*sample); err != nil {
-					log.Warn().Err(err).Msg("failed to write sample")
-				}
-			}
-		}
+		rtpToTrack(audioIn, audioTrack, audioCodec)
+		wg.Done()
 	}()
 
 	go func() {
@@ -126,6 +84,43 @@ func NewRTPSender(
 	}()
 
 	return nil
+}
+
+func codecToDepacketizer(codec webrtc.RTPCodecCapability) rtp.Depacketizer {
+	switch codec.MimeType {
+	case webrtc.MimeTypeVP8:
+		return &codecs.VP8Packet{}
+	case webrtc.MimeTypeVP9:
+		return &codecs.VP9Packet{}
+	case webrtc.MimeTypeOpus:
+		return &codecs.OpusPacket{}
+	default:
+		return nil
+	}
+}
+
+func rtpToTrack(rtpIn chan *rtp.Packet, track *webrtc.TrackLocalStaticSample, codec webrtc.RTPCodecCapability) {
+	buf := samplebuilder.New(10, codecToDepacketizer(codec), codec.ClockRate)
+	prevSSRC := uint32(0)
+	for p := range rtpIn {
+		if prevSSRC != 0 && prevSSRC != p.Header.SSRC {
+			// reset the buffer.
+			log.Warn().Uint32("PrevSSRC", prevSSRC).Uint32("NextSSRC", p.Header.SSRC).Msg("sample buffer reset due to SSRC change")
+			buf = samplebuilder.New(10, &codecs.OpusPacket{}, codec.ClockRate)
+		}
+		prevSSRC = p.Header.SSRC
+		buf.Push(p)
+		for {
+			sample := buf.Pop()
+			if sample == nil {
+				break
+			}
+
+			if err := track.WriteSample(*sample); err != nil {
+				log.Warn().Err(err).Msg("failed to write sample")
+			}
+		}
+	}
 }
 
 func processRTCP(rtpSender *webrtc.RTPSender) {
