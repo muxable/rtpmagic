@@ -1,10 +1,17 @@
 package packets
 
+import (
+	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v3"
+)
+
 type Codec struct {
+	webrtc.RTPCodecCapability
+	rtp.Depacketizer
+
 	PayloadType byte
-	MimeType    string
-	ClockRate   uint32
 }
+
 
 // CodecSet is a set of codecs for easy access.
 type CodecSet struct {

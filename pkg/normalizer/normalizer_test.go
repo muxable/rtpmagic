@@ -8,6 +8,7 @@ import (
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v3"
 	"go.uber.org/goleak"
 )
 
@@ -24,8 +25,10 @@ func TestNormalizer_Simple(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
@@ -65,8 +68,10 @@ func TestNormalizer_MatchesClockRate(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
@@ -125,8 +130,10 @@ func TestNormalizer_SeparateSSRC(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
@@ -187,8 +194,10 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
@@ -239,7 +248,7 @@ func TestNormalizer_CleanupLoop(t *testing.T) {
 
 func TestNormalizer_TooEarly(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	
+
 	in := make(chan *rtp.Packet, 10)
 
 	defer close(in)
@@ -250,8 +259,10 @@ func TestNormalizer_TooEarly(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
@@ -305,8 +316,10 @@ func TestNormalizer_InvalidPayload(t *testing.T) {
 		Codecs: packets.NewCodecSet([]packets.Codec{
 			{
 				PayloadType: 96,
-				MimeType:    "video",
-				ClockRate:   90000,
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video",
+					ClockRate: 90000,
+				},
 			},
 		}),
 		Clock: mockClock,
