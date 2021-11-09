@@ -91,7 +91,6 @@ func (n *NetSimUDPConn) reconnect(i int) error {
 				log.Warn().Msgf("failed to read: %v", err)
 				return
 			}
-			log.Printf("read")
 			n.readChan <- buf[:len]
 		}
 	}()
@@ -105,7 +104,6 @@ func (n *NetSimUDPConn) Read(b []byte) (int, error) {
 	if !ok {
 		return 0, io.EOF
 	}
-	log.Printf("response")
 	copy(b, buf)
 	return len(buf), nil
 }
