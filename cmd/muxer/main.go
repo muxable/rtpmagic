@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/muxable/rtpmagic/pkg/gstreamer"
 	"github.com/muxable/rtpmagic/pkg/nack"
 	"github.com/muxable/rtpmagic/pkg/packets"
+	"github.com/muxable/rtpmagic/pkg/reports"
 	"github.com/muxable/rtpmagic/test/netsim"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -20,7 +23,7 @@ func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
 	if useNetsim {
 		return netsim.NewNetSimUDPConn(destination, []*netsim.ConnectionState{
 			{
-				DropRate:      0.30,
+				DropRate: 0.30,
 			},
 		})
 	}
@@ -31,11 +34,23 @@ func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
 	return net.DialUDP("udp", nil, addr)
 }
 
-func writeRTP(conn io.ReadWriter, p *rtp.Packet) error {
+func writeRTP(conn io.Writer, p *rtp.Packet) error {
 	b, err := p.Marshal()
 	if err != nil {
 		return err
 	}
+	return writeBytes(conn, b)
+}
+
+func writeRTCP(conn io.Writer, p rtcp.CompoundPacket) error {
+	b, err := p.Marshal()
+	if err != nil {
+		return err
+	}
+	return writeBytes(conn, b)
+}
+
+func writeBytes(conn io.Writer, b []byte) error {
 	if _, err := conn.Write(b); err != nil {
 		return err
 	}
@@ -49,6 +64,7 @@ func writeRTP(conn io.ReadWriter, p *rtp.Packet) error {
 func main() {
 	rtmp := flag.String("rtmp", "", "rtmp url")
 	test := flag.Bool("test", false, "use test src")
+	cname := flag.String("cname", "mugit", "cname to send as")
 	netsim := flag.Bool("netsim", false, "use netsim connection")
 	destination := flag.String("dest", "", "destination")
 	audioMimeType := flag.String("audio", webrtc.MimeTypeOpus, "audio mime type")
@@ -88,6 +104,14 @@ func main() {
 			audioCodec.GStreamerPipeline)
 	} else if rtmp != nil {
 		// TODO: pipeline string for rtmp.
+		pipelineStr = fmt.Sprintf(`
+			rtmpsrc location=%s ! 
+			flvdemux name=demux
+			demux.video ! h264parse ! decodebin ! %s ! appsink name=videosink
+			demux.audio ! aacparse ! decodebin ! %s ! appsink name=audiosink`,
+			*rtmp,
+			videoCodec.GStreamerPipeline,
+			audioCodec.GStreamerPipeline)
 	}
 
 	audioSSRC := uint32(0)
@@ -100,7 +124,6 @@ func main() {
 		case videoCodec.PayloadType:
 			videoSSRC = p.SSRC
 			videoSendBuffer.Add(p)
-			log.Printf("sending ts %d", p.Timestamp)
 		case audioCodec.PayloadType:
 			audioSSRC = p.SSRC
 			audioSendBuffer.Add(p)
@@ -112,26 +135,52 @@ func main() {
 
 	pipeline.Start()
 
-	// ctx, cancel := context.WithCancel(context.Background())
-	// videoSenderStream := reports.NewSenderStream(videoCodec.ClockRate)
-	// audioSenderStream := reports.NewSenderStream(audioCodec.ClockRate)
-	// go func() {
-	// 	// send forward SDES and SR packets over RTCP
-	// 	ticker := time.NewTicker(2 * time.Second)
-	// 	defer ticker.Stop()
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 		case <-ticker.C:
-	// 			now := time.Now()
-	// 			// build feedback for video ssrc.
-	// 			videoPacket := videoSenderStream.BuildFeedbackPacket(now, videoSSRC)
-				
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	videoSenderStream := reports.NewSenderStream(videoCodec.ClockRate)
+	audioSenderStream := reports.NewSenderStream(audioCodec.ClockRate)
+	go func() {
+		// send forward SDES and SR packets over RTCP
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+			case <-ticker.C:
+				now := time.Now()
+				// build sdes packet
+				sdes := rtcp.SourceDescription{
+					Chunks: []rtcp.SourceDescriptionChunk{{
+						Source: videoSSRC,
+						Items: []rtcp.SourceDescriptionItem{{
+							Type: rtcp.SDESCNAME,
+							Text: *cname,
+						}},
+					}},
+				}
 
+				// build feedback for video ssrc.
+				videoPacket := rtcp.CompoundPacket{
+					videoSenderStream.BuildFeedbackPacket(now, videoSSRC),
+					&sdes,
+				}
 
+				// build feedback for audio ssrc.
+				audioPacket := rtcp.CompoundPacket{
+					audioSenderStream.BuildFeedbackPacket(now, audioSSRC),
+					&sdes,
+				}
 
-	// 		}
-	// }()
+				// send the packets.
+				if err := writeRTCP(conn, videoPacket); err != nil {
+					log.Error().Err(err).Msg("failed to write rtcp")
+				}
+				if err := writeRTCP(conn, audioPacket); err != nil {
+					log.Error().Err(err).Msg("failed to write rtcp")
+				}
+			}
+		}
+	}()
 
 	for {
 		buf := make([]byte, 1500)
