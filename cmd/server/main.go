@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"time"
@@ -13,8 +14,6 @@ import (
 	"github.com/muxable/rtpmagic/pkg/receiver"
 	"github.com/muxable/rtpmagic/pkg/sender"
 	"github.com/pion/rtcp"
-	"github.com/pion/rtp/codecs"
-	"github.com/pion/webrtc/v3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,33 +28,26 @@ import (
 // - pt muxer (implicit)
 // - sender
 func main() {
+	from := flag.String("from", "0.0.0.0:5000", "The address to receive from")
+	to := flag.String("to", "34.72.248.242:50051", "The address to send to")
+	flag.Parse()
+
 	ctx := pipeline.Context{
-		Codecs: packets.NewCodecSet([]packets.Codec{
-			{
-				PayloadType: 96,
-				RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
-				Depacketizer: &codecs.VP8Packet{},
-			},
-			{
-				PayloadType: 111,
-				RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000},
-				Depacketizer: &codecs.OpusPacket{},
-			},
-		}),
+		Codecs:     packets.DefaultCodecSet(),
 		Clock:      clock.New(),
 		SenderSSRC: rand.Uint32(),
 	}
 	rtcpReturn := make(chan rtcp.CompoundPacket)
 
 	// receive inbound packets.
-	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, "0.0.0.0:5000", 200*time.Millisecond, rtcpReturn)
+	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, *from, 200*time.Millisecond, rtcpReturn)
 	if err != nil {
 		panic(err)
 	}
 
 	demuxer.NewCNAMEDemuxer(ctx, rtpIn, rtcpIn, func(cnameSource *demuxer.CNAMESource) {
 		demuxer.NewSSRCDemuxer(ctx, cnameSource.RTP, cnameSource.RTCP, func(ssrcSource *demuxer.SSRCSource) {
-			jb, nack := jitterbuffer.NewCompositeJitterBuffer(ctx, ssrcSource.RTP, []time.Duration{250 * time.Millisecond, 250 * time.Millisecond}, 350*time.Millisecond)
+			jb, nack := jitterbuffer.NewCompositeJitterBuffer(ctx, ssrcSource.RTP, []time.Duration{200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond}, 350*time.Millisecond)
 			go func() {
 				for n := range nack {
 					p := rtcp.TransportLayerNack{
@@ -81,8 +73,8 @@ func main() {
 				log.Info().Str("CNAME", cnameSource.CNAME).Uint32("SSRC", ssrcSource.SSRC).Uint8("PayloadType", payloadTypeSource.PayloadType).Msg("new inbound stream")
 
 				if err := sender.NewRTPSender(
-					"34.72.248.242:50051",
-					cnameSource.CNAME,  // broadcast to
+					*to,
+					cnameSource.CNAME, // broadcast to
 					fmt.Sprintf("%s-%d-%d", cnameSource.CNAME, ssrcSource.SSRC, payloadTypeSource.PayloadType), // identify as
 					codec,
 					payloadTypeSource.RTP); err != nil {

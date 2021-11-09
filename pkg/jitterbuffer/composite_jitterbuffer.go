@@ -14,11 +14,16 @@ import (
 
 // NewCompositeJitterBuffer creates a new sequence of jitter buffers with nack emitters in between them.
 //
-// pipes: rtpIn - jb - o - jb - o - jb - o
+//                  -evict-  -evict-
+//                 |       ||       |
+// pipes: rtpIn - jb - o - jb - o - jb - rtpOut
 //                     |        |
 // nack:               nack     nack
+//                     |		|
+//					    ---------------> nackOut
 func NewCompositeJitterBuffer(ctx pipeline.Context, rtpIn chan *rtp.Packet, delays []time.Duration, nackInterval time.Duration) (chan *rtp.Packet, chan []rtcp.NackPair) {
 	pipes := make([]chan *packets.TimestampedPacket, len(delays)+1)
+	evicts := make([]chan *packets.TimestampedPacket, len(delays))
 	nackFunnel := make(chan uint16)
 	nackOut := make(chan []rtcp.NackPair)
 	var wg sync.WaitGroup
@@ -26,7 +31,7 @@ func NewCompositeJitterBuffer(ctx pipeline.Context, rtpIn chan *rtp.Packet, dela
 	pipes[0] = normalizer.NewNormalizer(ctx, rtpIn)
 	for i, delay := range delays {
 		if i == 0 {
-			pipes[i+1] = NewJitterBuffer(ctx, strconv.FormatInt(int64(i), 10), delay, pipes[i])
+			pipes[i+1], evicts[i] = NewJitterBuffer(ctx, strconv.FormatInt(int64(i), 10), delay, pipes[i])
 		} else {
 			// the input has to be multicasted to a nack emitter too.
 			jb := make(chan *packets.TimestampedPacket)
@@ -37,7 +42,13 @@ func NewCompositeJitterBuffer(ctx pipeline.Context, rtpIn chan *rtp.Packet, dela
 					nack <- p
 				}
 			}(i)
-			pipes[i+1] = NewJitterBuffer(ctx, strconv.FormatInt(int64(i), 10), delay, jb)
+			// also pipe the evicts from the last jitter buffer, which skip the nack emitter.
+			go func(i int) {
+				for p := range evicts[i-1] {
+					jb <- p
+				}
+			}(i)
+			pipes[i+1], evicts[i] = NewJitterBuffer(ctx, strconv.FormatInt(int64(i), 10), delay, jb)
 			nackCh := NewNackEmitter(nack)
 
 			wg.Add(1)
@@ -49,6 +60,12 @@ func NewCompositeJitterBuffer(ctx pipeline.Context, rtpIn chan *rtp.Packet, dela
 			}()
 		}
 	}
+
+	// sink the last evict, these are packets that are too late.
+	go func() {
+		for range evicts[len(delays)-1] {
+		}
+	}()
 
 	go func() {
 		wg.Wait()

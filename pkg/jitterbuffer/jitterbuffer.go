@@ -12,31 +12,34 @@ import (
 
 type JitterBuffer struct {
 	sync.RWMutex
-	ctx                  pipeline.Context
-	delay                time.Duration
-	buffer               []*packets.TimestampedPacket
-	name                 string
-	tail                 uint16
-	count                uint16
-	timestampedPacketIn  chan *packets.TimestampedPacket
-	timestampedPacketOut chan *packets.TimestampedPacket
-	latestTimestamp      time.Time
+	ctx                         pipeline.Context
+	delay                       time.Duration
+	buffer                      []*packets.TimestampedPacket
+	name                        string
+	tail                        uint16
+	count                       uint16
+	timestampedPacketIn         chan *packets.TimestampedPacket
+	timestampedPacketOut        chan *packets.TimestampedPacket
+	evictedTimestampedPacketOut chan *packets.TimestampedPacket
+	latestTimestamp             time.Time
 }
 
 // NewJitterBuffer creates a new singular jitter buffer with the given context and delay.
-func NewJitterBuffer(ctx pipeline.Context, name string, delay time.Duration, timestampedPacketIn chan *packets.TimestampedPacket) chan *packets.TimestampedPacket {
+func NewJitterBuffer(ctx pipeline.Context, name string, delay time.Duration, timestampedPacketIn chan *packets.TimestampedPacket) (chan *packets.TimestampedPacket, chan *packets.TimestampedPacket) {
 	timestampedPacketOut := make(chan *packets.TimestampedPacket)
-	buf := &JitterBuffer{
-		ctx:                  ctx,
-		delay:                delay,
-		name:                 name,
-		buffer:               make([]*packets.TimestampedPacket, math.MaxUint16+1),
-		timestampedPacketIn:  timestampedPacketIn,
-		timestampedPacketOut: timestampedPacketOut,
-		latestTimestamp:      ctx.Clock.Now(),
+	evictedTimestampedPacketOut := make(chan *packets.TimestampedPacket)
+	jb := &JitterBuffer{
+		ctx:                         ctx,
+		delay:                       delay,
+		name:                        name,
+		buffer:                      make([]*packets.TimestampedPacket, math.MaxUint16+1),
+		timestampedPacketIn:         timestampedPacketIn,
+		timestampedPacketOut:        timestampedPacketOut,
+		evictedTimestampedPacketOut: evictedTimestampedPacketOut,
+		latestTimestamp:             ctx.Clock.Now(),
 	}
-	go buf.start()
-	return timestampedPacketOut
+	go jb.start()
+	return timestampedPacketOut, evictedTimestampedPacketOut
 }
 
 // getMid returns the index of the next non-nil packet searching from the tail.
@@ -63,12 +66,14 @@ func (jb *JitterBuffer) start() {
 				return
 			}
 
-			// check if the timestamp is to be emitted in the future. if it isn't, then it's too late
-			// and emitting it will violate the output invariant.
+			// check if the timestamp is to be emitted in the future.
+			// evict packets that are too late because they are likely retransmissions.
 			emitTimestamp := p.Timestamp.Add(jb.delay)
 			if emitTimestamp.Before(jb.latestTimestamp) {
-				log.Warn().Msgf("jitterbuffer: packet %d is too late", p.Packet.SequenceNumber)
-				jb.timestampedPacketOut <- p
+				jb.evictedTimestampedPacketOut <- &packets.TimestampedPacket{
+					Packet:    p.Packet,
+					Timestamp: emitTimestamp,
+				}
 				break
 			}
 			if jb.buffer[p.Packet.SequenceNumber] == nil {

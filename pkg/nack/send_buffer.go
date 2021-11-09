@@ -32,7 +32,7 @@ func NewSendBuffer(size uint16) (*SendBuffer, error) {
 	}
 
 	if !correctSize {
-		return nil, fmt.Errorf("%w: %d is not a valid size, allowed sizes: %v", ErrInvalidSize, size, allowedSizes)
+		return nil, fmt.Errorf("%d is not a valid size, allowed sizes: %v", size, allowedSizes)
 	}
 
 	return &SendBuffer{

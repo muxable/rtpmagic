@@ -29,7 +29,7 @@ func NewReceiver(now time.Time, config Config) *Receiver {
 }
 
 // OnReceiveMediaPacket implements the media receive algorithm.
-func (r *Receiver) OnReceiveMediaPacket(now time.Time) {
+func (r *Receiver) OnReceiveMediaPacket(now time.Time, seq uint16, ecn bool) {
 	// obtain current timestamp t_curr from system clock
 	r.CurrentTimestamp = now
 

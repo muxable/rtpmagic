@@ -40,7 +40,7 @@ func TestJitterBuffer_Simple(t *testing.T) {
 
 	mockClock := clock.New()
 
-	out := NewJitterBuffer(pipeline.Context{
+	out, _ := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
 	}, "debug", 100*time.Millisecond, in)
@@ -76,7 +76,7 @@ func TestJitterBuffer_TwoPackets_OrdersBySequence(t *testing.T) {
 
 	mockClock := clock.New()
 
-	out := NewJitterBuffer(pipeline.Context{
+	out, _ := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
 	}, "debug", 100*time.Millisecond, in)
@@ -122,7 +122,7 @@ func TestJitterBuffer_Deduplicates(t *testing.T) {
 
 	mockClock := clock.New()
 
-	out := NewJitterBuffer(pipeline.Context{
+	out, _ := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
 	}, "debug", 100*time.Millisecond, in)
@@ -170,7 +170,7 @@ func TestJitterBuffer_LotsOfPackets(t *testing.T) {
 
 	mockClock := clock.New()
 
-	out := NewJitterBuffer(pipeline.Context{
+	out, _ := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
 	}, "debug", 100*time.Millisecond, in)
@@ -270,7 +270,7 @@ func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
 
 	mockClock := clock.New()
 
-	out := NewJitterBuffer(pipeline.Context{
+	out, evict := NewJitterBuffer(pipeline.Context{
 		Codecs: packets.NewCodecSet([]packets.Codec{}),
 		Clock:  mockClock,
 	}, "debug", 100*time.Millisecond, in)
@@ -284,7 +284,7 @@ func TestJitterBuffer_TwoPackets_PacketTooLate(t *testing.T) {
 	in <- &p2
 
 	select {
-	case val2 := <-out:
+	case val2 := <-evict:
 		// p2 should be evicted immediately.
 		if val2.Packet.SequenceNumber != p2.Packet.SequenceNumber {
 			t.Errorf("expected %v, got %v", p2, val2)

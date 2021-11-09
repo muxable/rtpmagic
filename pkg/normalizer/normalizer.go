@@ -57,15 +57,6 @@ func (n *Normalizer) inputLoop(cancel context.CancelFunc) {
 			n.sessions[SSRC(p.SSRC)] = session
 		}
 		n.sessionsLock.Unlock()
-		// if this packet is older than the initial timestamp, ignore it.
-		//
-		// TODO: we should handle this case better because we're assuming that
-		// the first packet from a given SSRC is the initialization packet.
-		// In reality, this may not be the case if the ordering is incorrect.
-		if p.Timestamp < session.initialRTPTimestamp {
-			log.Warn().Uint32("Timestamp", p.Timestamp).Uint32("InitialTimestamp", session.initialRTPTimestamp).Msg("received packet with timestamp too early")
-			continue
-		}
 		// get the codec for the given payload type.
 		codec, ok := n.ctx.Codecs.FindByPayloadType(p.PayloadType)
 		if !ok {
