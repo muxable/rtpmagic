@@ -2,13 +2,17 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"net"
 
 	"github.com/muxable/rtpmagic/pkg/gstreamer"
+	"github.com/muxable/rtpmagic/pkg/nack"
+	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtpmagic/test/netsim"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -16,16 +20,7 @@ func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
 	if useNetsim {
 		return netsim.NewNetSimUDPConn(destination, []*netsim.ConnectionState{
 			{
-				DropRate:      0.10,
-				DuplicateRate: 0.10,
-			},
-			{
-				DropRate:      0.10,
-				DuplicateRate: 0.10,
-			},
-			{
-				DropRate:      0.10,
-				DuplicateRate: 0.10,
+				DropRate:      0.30,
 			},
 		})
 	}
@@ -34,6 +29,17 @@ func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 	return net.DialUDP("udp", nil, addr)
+}
+
+func writeRTP(conn io.ReadWriter, p *rtp.Packet) error {
+	b, err := p.Marshal()
+	if err != nil {
+		return err
+	}
+	if _, err := conn.Write(b); err != nil {
+		return err
+	}
+	return nil
 }
 
 // the general pipeline is
@@ -45,21 +51,41 @@ func main() {
 	test := flag.Bool("test", false, "use test src")
 	netsim := flag.Bool("netsim", false, "use netsim connection")
 	destination := flag.String("dest", "", "destination")
+	audioMimeType := flag.String("audio", webrtc.MimeTypeOpus, "audio mime type")
+	videoMimeType := flag.String("video", webrtc.MimeTypeVP8, "video mime type")
 	flag.Parse()
+
+	audioCodec, ok := packets.DefaultCodecSet().FindByMimeType(*audioMimeType)
+	if !ok {
+		log.Fatal().Msg("no audio codec")
+	}
+	videoCodec, ok := packets.DefaultCodecSet().FindByMimeType(*videoMimeType)
+	if !ok {
+		log.Fatal().Msg("no video codec")
+	}
 
 	conn, err := dial(*destination, *netsim)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to dial")
 	}
 
+	videoSendBuffer, err := nack.NewSendBuffer(1 << 14)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create send buffer")
+	}
+	audioSendBuffer, err := nack.NewSendBuffer(1 << 12)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create send buffer")
+	}
+
 	// create a new gstreamer pipeline.
 	var pipelineStr string
 	if *test {
-		pipelineStr = `
-			videotestsrc !
-				vp8enc error-resilient=1 deadline=1 cpu-used=5 keyframe-max-dist=10 auto-alt-ref=1 ! rtpvp8pay pt=96 ! appsink name=videosink
-			audiotestsrc ! audioresample ! audio/x-raw,channels=1,rate=48000 !
-				opusenc inband-fec=true packet-loss-percentage=10 ! rtpopuspay pt=111 ! appsink name=audiosink`
+		pipelineStr = fmt.Sprintf(`
+			videotestsrc ! %s ! appsink name=videosink
+			audiotestsrc ! %s ! appsink name=audiosink`,
+			videoCodec.GStreamerPipeline,
+			audioCodec.GStreamerPipeline)
 	} else if rtmp != nil {
 		// TODO: pipeline string for rtmp.
 	}
@@ -71,23 +97,41 @@ func main() {
 
 	pipeline.OnRTPPacket(func(p *rtp.Packet) {
 		switch p.PayloadType {
-		case 96:
+		case videoCodec.PayloadType:
 			videoSSRC = p.SSRC
-		case 111:
+			videoSendBuffer.Add(p)
+			log.Printf("sending ts %d", p.Timestamp)
+		case audioCodec.PayloadType:
 			audioSSRC = p.SSRC
+			audioSendBuffer.Add(p)
 		}
-		b, err := p.Marshal()
-		if err != nil {
-			log.Error().Err(err).Msg("failed to marshal rtp packet")
-			return
-		}
-		if _, err := conn.Write(b); err != nil {
-			log.Error().Err(err).Msg("failed to write rtp packet")
-			return
+		if err := writeRTP(conn, p); err != nil {
+			log.Error().Err(err).Msg("failed to write rtp")
 		}
 	})
 
 	pipeline.Start()
+
+	// ctx, cancel := context.WithCancel(context.Background())
+	// videoSenderStream := reports.NewSenderStream(videoCodec.ClockRate)
+	// audioSenderStream := reports.NewSenderStream(audioCodec.ClockRate)
+	// go func() {
+	// 	// send forward SDES and SR packets over RTCP
+	// 	ticker := time.NewTicker(2 * time.Second)
+	// 	defer ticker.Stop()
+	// 	for {
+	// 		select {
+	// 		case <-ctx.Done():
+	// 		case <-ticker.C:
+	// 			now := time.Now()
+	// 			// build feedback for video ssrc.
+	// 			videoPacket := videoSenderStream.BuildFeedbackPacket(now, videoSSRC)
+				
+
+
+
+	// 		}
+	// }()
 
 	for {
 		buf := make([]byte, 1500)
@@ -116,14 +160,32 @@ func main() {
 			case *rtcp.Goodbye:
 				log.Info().Msg("Goodbye")
 			case *rtcp.TransportLayerNack:
-				log.Info().Msg("Transport Layer Nack")
+				for _, nack := range p.Nacks {
+					for _, id := range nack.PacketList() {
+						switch p.MediaSSRC {
+						case videoSSRC:
+							q := videoSendBuffer.Get(id)
+							if q != nil {
+								if err := writeRTP(conn, q); err != nil {
+									log.Error().Err(err).Msg("failed to write rtp")
+								}
+							}
+						case audioSSRC:
+							q := audioSendBuffer.Get(id)
+							if q != nil {
+								if err := writeRTP(conn, q); err != nil {
+									log.Error().Err(err).Msg("failed to write rtp")
+								}
+							}
+						}
+					}
+				}
 			case *rtcp.TransportLayerCC:
 				log.Info().Msg("Transport Layer CC")
 			default:
 				log.Warn().Interface("Packet", p).Msg("unknown rtcp packet")
 			}
 		}
-
 	}
 }
 
