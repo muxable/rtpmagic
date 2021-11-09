@@ -2,12 +2,39 @@ package main
 
 import (
 	"flag"
+	"io"
 	"net"
 
+	"github.com/muxable/rtpmagic/pkg/gstreamer"
+	"github.com/muxable/rtpmagic/test/netsim"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
 )
+
+func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
+	if useNetsim {
+		return netsim.NewNetSimUDPConn(destination, []*netsim.ConnectionState{
+			{
+				DropRate:      0.10,
+				DuplicateRate: 0.10,
+			},
+			{
+				DropRate:      0.10,
+				DuplicateRate: 0.10,
+			},
+			{
+				DropRate:      0.10,
+				DuplicateRate: 0.10,
+			},
+		})
+	}
+	addr, err := net.ResolveUDPAddr("udp", destination)
+	if err != nil {
+		return nil, err
+	}
+	return net.DialUDP("udp", nil, addr)
+}
 
 // the general pipeline is
 // audio/video src as string -> raw
@@ -16,60 +43,50 @@ import (
 func main() {
 	rtmp := flag.String("rtmp", "", "rtmp url")
 	test := flag.Bool("test", false, "use test src")
+	netsim := flag.Bool("netsim", false, "use netsim connection")
 	destination := flag.String("dest", "", "destination")
 	flag.Parse()
 
-	addr, err := net.ResolveUDPAddr("udp", *destination)
+	conn, err := dial(*destination, *netsim)
 	if err != nil {
-		panic(err)
-	}
-	conn, err := net.DialUDP("udp", nil, addr)
-	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to dial")
 	}
 
 	// create a new gstreamer pipeline.
 	var pipelineStr string
 	if *test {
 		pipelineStr = `
-			videotestsrc ! video/x-raw,width=1920,height=1080,framerate=30/1 !
-				videoscale ! videorate ! videconvert ! timeoverlay !
-				vp8enc error-resilient=1 ! rtpvp8pay pt=96 ! appsink name=videosink
+			videotestsrc !
+				vp8enc error-resilient=1 deadline=1 cpu-used=5 keyframe-max-dist=10 auto-alt-ref=1 ! rtpvp8pay pt=96 ! appsink name=videosink
 			audiotestsrc ! audioresample ! audio/x-raw,channels=1,rate=48000 !
-				opusenc ! rtpopuspay pt=111 ! appsink name=audiosink`
+				opusenc inband-fec=true packet-loss-percentage=10 ! rtpopuspay pt=111 ! appsink name=audiosink`
 	} else if rtmp != nil {
 		// TODO: pipeline string for rtmp.
 	}
 
-	pipeline := C.gstreamer_create_pipeline(pipelineStr)
-
 	audioSSRC := uint32(0)
 	videoSSRC := uint32(0)
 
-	pipeline.OnAudioPacket(func(buf []byte) {
-		p := &rtp.Packet{}
-		if err := p.Unmarshal(buf); err != nil {
-			log.Error().Err(err).Msg("failed to unmarshal rtp packet")
+	pipeline := gstreamer.NewPipeline(pipelineStr)
+
+	pipeline.OnRTPPacket(func(p *rtp.Packet) {
+		switch p.PayloadType {
+		case 96:
+			videoSSRC = p.SSRC
+		case 111:
+			audioSSRC = p.SSRC
+		}
+		b, err := p.Marshal()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to marshal rtp packet")
 			return
 		}
-		audioSSRC = p.SSRC
-		if _, err := conn.Write(buf); err != nil {
-			panic(err)
+		if _, err := conn.Write(b); err != nil {
+			log.Error().Err(err).Msg("failed to write rtp packet")
+			return
 		}
 	})
 
-	pipeline.OnVideoPacket(func(buf []byte) {
-		p := &rtp.Packet{}
-		if err := p.Unmarshal(buf); err != nil {
-			log.Error().Err(err).Msg("failed to unmarshal rtp packet")
-			return
-		}
-		videoSSRC = p.SSRC
-		if _, err := conn.Write(buf); err != nil {
-			panic(err)
-		}
-	})
-	
 	pipeline.Start()
 
 	for {

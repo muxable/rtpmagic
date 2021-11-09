@@ -78,6 +78,8 @@ func main() {
 					return
 				}
 
+				log.Info().Str("CNAME", cnameSource.CNAME).Uint32("SSRC", ssrcSource.SSRC).Uint8("PayloadType", payloadTypeSource.PayloadType).Msg("new inbound stream")
+
 				if err := sender.NewRTPSender(
 					"34.72.248.242:50051",
 					cnameSource.CNAME,  // broadcast to

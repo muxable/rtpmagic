@@ -1,4 +1,4 @@
-package test
+package netsim
 
 import (
 	"io"
@@ -11,11 +11,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type SimulatedConnection struct {
+type ConnectionState struct {
 	ReconnectionLikelihood float64
 	ReconnectionPeriod     time.Duration
 	ReconnectionDelay      time.Duration
 	DropRate               float64
+	DuplicateRate          float64
 	LatencyMean            time.Duration
 	LatencyVariance        time.Duration
 }
@@ -26,21 +27,21 @@ type NetSimUDPConn struct {
 	addr              string
 	activeConnections []*net.UDPConn
 	closed            bool
-	configs           []*SimulatedConnection
-	readChan          chan []byte 
+	configs           []*ConnectionState
+	readChan          chan []byte
 }
 
-func NewNetSimUDPConn(addr string, configs []*SimulatedConnection) (*NetSimUDPConn, error) {
+func NewNetSimUDPConn(addr string, configs []*ConnectionState) (*NetSimUDPConn, error) {
 	n := &NetSimUDPConn{
-		addr: addr,
+		addr:              addr,
 		activeConnections: make([]*net.UDPConn, len(configs)),
 		configs:           configs,
-		readChan:          make(chan []byte),
+		readChan:          make(chan []byte, 128),
 	}
 	// reconnection loop.
 	for i, config := range configs {
 		n.reconnect(i)
-		go func(config *SimulatedConnection) {
+		go func(config *ConnectionState) {
 			for {
 				time.Sleep(config.ReconnectionPeriod)
 
@@ -90,6 +91,7 @@ func (n *NetSimUDPConn) reconnect(i int) error {
 				log.Warn().Msgf("failed to read: %v", err)
 				return
 			}
+			log.Printf("read")
 			n.readChan <- buf[:len]
 		}
 	}()
@@ -103,6 +105,7 @@ func (n *NetSimUDPConn) Read(b []byte) (int, error) {
 	if !ok {
 		return 0, io.EOF
 	}
+	log.Printf("response")
 	copy(b, buf)
 	return len(buf), nil
 }
@@ -110,19 +113,26 @@ func (n *NetSimUDPConn) Read(b []byte) (int, error) {
 func (n *NetSimUDPConn) Write(data []byte) (int, error) {
 	i := rand.Intn(len(n.activeConnections))
 	config := n.configs[i]
+	writeCount := 1
 	if rand.Float64() < config.DropRate {
 		// this packet got dropped.
 		p := &rtp.Packet{}
 		p.Unmarshal(data)
 		return len(data), nil
 	}
+	if rand.Float64() < config.DuplicateRate {
+		// this packet got duplicated.
+		writeCount = 2
+	}
 	dup := make([]byte, len(data))
 	copy(dup, data)
 	go func() {
 		time.Sleep(time.Duration(rand.NormFloat64()*1000000)*time.Microsecond*config.LatencyVariance + config.LatencyMean)
 		n.RLock()
-		if _, err := n.activeConnections[i].Write(data); err != nil {
-			log.Warn().Msgf("failed to write: %v", err)
+		for j := 0; j < writeCount; j++ {
+			if _, err := n.activeConnections[i].Write(data); err != nil {
+				log.Warn().Msgf("failed to write: %v", err)
+			}
 		}
 		n.RUnlock()
 	}()
