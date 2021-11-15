@@ -23,7 +23,6 @@ func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
 	if useNetsim {
 		return netsim.NewNetSimUDPConn(destination, []*netsim.ConnectionState{
 			{
-				DropRate: 0.30,
 			},
 		})
 	}

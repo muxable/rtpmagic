@@ -30,7 +30,7 @@ func NewPipeline(pipeline string) *Pipeline {
 	return &Pipeline{
 		pipeline: pipeline,
 		onRTPPacket: func(p *rtp.Packet) {
-			log.Printf("audio packet %v", p)
+			log.Printf("packet %v", p)
 		},
 	}
 }
