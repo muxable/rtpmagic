@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muxable/rtpmagic/pkg/muxer/balancer"
 	"github.com/muxable/rtpmagic/pkg/muxer/nack"
 	"github.com/muxable/rtpmagic/pkg/muxer/transcoder"
 	"github.com/muxable/rtpmagic/pkg/packets"
@@ -19,16 +20,16 @@ import (
 )
 
 func dial(destination string, useNetsim bool) (io.ReadWriteCloser, error) {
-	if useNetsim {
-		return netsim.NewNetSimUDPConn(destination, []*netsim.ConnectionState{
-			{},
-		})
-	}
 	addr, err := net.ResolveUDPAddr("udp", destination)
 	if err != nil {
 		return nil, err
 	}
-	return net.DialUDP("udp", nil, addr)
+	if useNetsim {
+		return netsim.NewNetSimUDPConn(addr, []*netsim.ConnectionState{
+			{},
+		})
+	}
+	return balancer.NewBalancedUDPConn(addr, 1 * time.Second)
 }
 
 func writeRTP(conn io.Writer, p *rtp.Packet) error {

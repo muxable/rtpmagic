@@ -24,14 +24,14 @@ type ConnectionState struct {
 type NetSimUDPConn struct {
 	sync.RWMutex
 
-	addr              string
+	addr              *net.UDPAddr
 	activeConnections []*net.UDPConn
 	closed            bool
 	configs           []*ConnectionState
 	readChan          chan []byte
 }
 
-func NewNetSimUDPConn(addr string, configs []*ConnectionState) (*NetSimUDPConn, error) {
+func NewNetSimUDPConn(addr *net.UDPAddr, configs []*ConnectionState) (*NetSimUDPConn, error) {
 	n := &NetSimUDPConn{
 		addr:              addr,
 		activeConnections: make([]*net.UDPConn, len(configs)),
@@ -74,11 +74,7 @@ func NewNetSimUDPConn(addr string, configs []*ConnectionState) (*NetSimUDPConn, 
 
 // reconnect reconnects a specific index.
 func (n *NetSimUDPConn) reconnect(i int) error {
-	parsed, err := net.ResolveUDPAddr("udp", n.addr)
-	if err != nil {
-		return err
-	}
-	c, err := net.DialUDP("udp", nil, parsed)
+	c, err := net.DialUDP("udp", nil, n.addr)
 	if err != nil {
 		log.Warn().Msgf("failed to reconnect to %s: %v", n.addr, err)
 		return err

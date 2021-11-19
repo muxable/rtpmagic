@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/muxable/rtpmagic/pkg/pipeline"
-	"github.com/pion/interceptor/pkg/twcc"
+	"github.com/pion/interceptor/v2/pkg/twcc"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
