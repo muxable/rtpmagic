@@ -11,71 +11,52 @@ import (
 	"unsafe"
 
 	"github.com/mattn/go-pointer"
+	"github.com/pion/rtp"
 )
 
 type Transcoder struct {
-	mimeType string
-	gstElement unsafe.Pointer
-	flvIn chan []byte
-	rtpOut chan []byte
+	uri           string
+	audioMimeType string
+	videoMimeType string
+	gstElement    *C.GstElement
+	rtpOut        chan []byte
 }
 
 func init() {
-	go C.gstreamer_main_loop()
-	C.gstreamer_init()
+	go C.g_main_loop_run(C.g_main_loop_new(nil, C.int(0)))
+	C.gst_init(nil, nil)
 }
 
-func NewTranscoder(mimeType string) (*Transcoder) {
+func NewTranscoder(uri, audioMimeType, videoMimeType string) *Transcoder {
 	t := &Transcoder{
-		mimeType: mimeType,
+		uri:           uri,
+		audioMimeType: audioMimeType,
+		videoMimeType: videoMimeType,
+		rtpOut:        make(chan []byte, 10),
 	}
 	go t.start()
 	return t
 }
 
 func (t *Transcoder) start() {
-	pipelineStr := C.CString(`
-		appsrc name=appsrc caps="video/x-raw,format=I420" ! tee name=t
-		
-		t. decodebin ! vp8enc ! rtpvp8pay pt=96 ! rtpfunnel name=f
-		t. decodebin ! opusenc ! rtpopuspay pt=111 ! rtpfunnel name=f
-
-		f. ! appsink name=appsink`)
+	pipelineStr := C.CString(t.uri)
 	defer C.free(unsafe.Pointer(pipelineStr))
 	t.gstElement = C.gstreamer_start(pipelineStr, pointer.Save(t))
-	for {
-		data, ok := <-t.flvIn
-		if !ok {
-			break
-		}
-		buf := C.CBytes(data)
-		C.gstreamer_write_flv(t.gstElement, buf)
-		C.free(buf)
-	}
 }
 
 //export goHandleRtpAppSinkBuffer
 func goHandleRtpAppSinkBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
-	pipeline := pointer.Restore(data).(*Transcoder)
-	pipeline.rtpOut <- C.GoBytes(buffer, C.int(bufferLen))
+	t := pointer.Restore(data).(*Transcoder)
+	t.rtpOut <- C.GoBytes(buffer, C.int(bufferLen))
 }
 
-
-func (t *Transcoder) Read(data []byte) (int, error) {
+func (t *Transcoder) ReadRTP(pkt *rtp.Packet) (int, error) {
 	buf, ok := <-t.rtpOut
 	if !ok {
 		return 0, io.EOF
 	}
-	copy(data, buf)
+	if err := pkt.Unmarshal(buf); err != nil {
+		return 0, err
+	}
 	return len(buf), nil
-}
-
-func (t *Transcoder) Write(data []byte) (int, error) {
-	t.flvIn <- data
-	return len(data), nil
-}
-
-func (t *Transcoder) Close() error {
-	close(t.flvIn)
-	close(t.rtpOut)
 }

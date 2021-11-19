@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/muxable/rtpmagic/pkg/demuxer"
-	"github.com/muxable/rtpmagic/pkg/jitterbuffer"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtpmagic/pkg/pipeline"
-	"github.com/muxable/rtpmagic/pkg/receiver"
-	"github.com/muxable/rtpmagic/pkg/sender"
+	receiver "github.com/muxable/rtpmagic/pkg/server/0_receiver"
+	demuxer "github.com/muxable/rtpmagic/pkg/server/1_demuxer"
+	jitterbuffer "github.com/muxable/rtpmagic/pkg/server/2_jitterbuffer"
+	sender "github.com/muxable/rtpmagic/pkg/server/3_sender"
 	"github.com/pion/rtcp"
 	"github.com/rs/zerolog/log"
 )

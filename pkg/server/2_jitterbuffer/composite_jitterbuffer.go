@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muxable/rtpmagic/pkg/normalizer"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtpmagic/pkg/pipeline"
+	"github.com/muxable/rtpmagic/pkg/server/2_jitterbuffer/normalizer"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 )

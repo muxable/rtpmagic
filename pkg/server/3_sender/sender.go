@@ -5,7 +5,6 @@ import (
 	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media/samplebuilder"
 	"github.com/rs/zerolog/log"
 )
 
@@ -22,7 +21,7 @@ var e = sdk.NewEngine(sdk.Config{
 	},
 })
 
-func NewRTPSender(	addr string, rid string, uid string, codec *packets.Codec, rtpIn chan *rtp.Packet) error {
+func NewRTPSender(addr string, rid string, uid string, codec *packets.Codec, rtpIn chan *rtp.Packet) error {
 	c, err := sdk.NewClient(e, addr, uid)
 	if err != nil {
 		return err
@@ -35,7 +34,7 @@ func NewRTPSender(	addr string, rid string, uid string, codec *packets.Codec, rt
 	})
 
 	// Create a video track
-	track, err := webrtc.NewTrackLocalStaticSample(codec.RTPCodecCapability, uid, uid)
+	track, err := webrtc.NewTrackLocalStaticRTP(codec.RTPCodecCapability, uid, uid)
 	if err != nil {
 		return err
 	}
@@ -50,18 +49,9 @@ func NewRTPSender(	addr string, rid string, uid string, codec *packets.Codec, rt
 	}
 
 	go func() {
-		buf := samplebuilder.New(10, codec.Depacketizer, codec.ClockRate)
 		for p := range rtpIn {
-			buf.Push(p)
-			for {
-				sample := buf.Pop()
-				if sample == nil {
-					break
-				}
-
-				if err := track.WriteSample(*sample); err != nil {
-					log.Warn().Err(err).Msg("failed to write sample")
-				}
+			if err := track.WriteRTP(p); err != nil {
+				log.Warn().Err(err).Msg("failed to write sample")
 			}
 		}
 		peerConnection.Close()

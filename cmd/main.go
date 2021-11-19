@@ -2,38 +2,33 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net"
 
-	"github.com/muxable/rtpmagic/pkg/rtmp"
-	"github.com/notedit/rtmp-lib/av"
+	"github.com/muxable/rtpmagic/pkg/muxer/transcoder"
+	"github.com/notedit/rtmp/av"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
-func toMimeType(avcodec av.CodecData) (string, error) {
-	switch avcodec.Type() {
+func toMimeType(avcodec int) (string, error) {
+	switch avcodec {
 	case av.H264:
 		return webrtc.MimeTypeH264, nil
 	case av.AAC:
 		return "audio/aac", nil
 	default:
-		return "", fmt.Errorf("unsupported codec: %v", avcodec.Type())
+		return "", fmt.Errorf("unsupported codec: %v", avcodec)
 	}
 }
 
 func main() {
-	sck, err := net.Listen("tcp", ":1935")
-	if err != nil {
-		panic(err)
-	}
-	defer sck.Close()
-	for {
-		conn, err := sck.Accept()
-		if err != nil {
-			panic(err)
-		}
-		rtmpConn := rtmp.Wrap(conn)
+	t := transcoder.NewTranscoder("rtmp://34.72.248.242/live/mugit", "", "")
 
-		log.Printf("rtmp %v", rtmpConn)
+	for {
+		p := &rtp.Packet{}
+		_, err := t.ReadRTP(p)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 	}
 }
