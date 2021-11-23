@@ -37,7 +37,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 			// add any interfaces that are not already active.
 			for device := range devices {
 				if !n.conns.Has(device) {
-					conn, err := DialVia(addr, device)
+					conn, err := net.DialUDP("udp", nil, addr)
 					if err != nil {
 						log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 					}
@@ -92,7 +92,7 @@ func (n *BalancedUDPConn) Write(data []byte) (int, error) {
 
 	_, conn := n.conns.Random()
 	if _, err := conn.Write(data); err != nil {
-		log.Warn().Msgf("failed to write: %v", err)
+		log.Warn().Err(err).Msg("failed to write")
 	}
 	return len(data), nil
 }

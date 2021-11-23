@@ -60,7 +60,7 @@ func (n *Normalizer) inputLoop(cancel context.CancelFunc) {
 		// get the codec for the given payload type.
 		codec, ok := n.ctx.Codecs.FindByPayloadType(p.PayloadType)
 		if !ok {
-			log.Warn().Uint8("PayloadType", uint8(p.PayloadType)).Uint32("SSRC", p.SSRC).Msg("unknown payload type")
+			log.Warn().Uint8("PayloadType", uint8(p.PayloadType)).Uint32("SSRC", p.SSRC).Msg("normalizer unknown payload type")
 			continue
 		}
 		// calculate the rtp timestamp delta.

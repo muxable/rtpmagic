@@ -37,10 +37,9 @@ func main() {
 		Clock:      clock.New(),
 		SenderSSRC: rand.Uint32(),
 	}
-	rtcpReturn := make(chan rtcp.CompoundPacket)
 
 	// receive inbound packets.
-	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, *from, 200*time.Millisecond, rtcpReturn)
+	rtpIn, rtcpIn, err := receiver.NewReceiver(ctx, *from, 200*time.Millisecond)
 	if err != nil {
 		panic(err)
 	}
@@ -56,14 +55,13 @@ func main() {
 						Nacks:      n,
 					}
 					log.Printf("sending nack %v", p)
-					rtcpReturn <- rtcp.CompoundPacket{&p}
 				}
 			}()
 			demuxer.NewPayloadTypeDemuxer(ctx, jb, func(payloadTypeSource *demuxer.PayloadTypeSource) {
 				// match with a codec.
 				codec, ok := ctx.Codecs.FindByPayloadType(payloadTypeSource.PayloadType)
 				if !ok {
-					log.Warn().Uint8("PayloadType", payloadTypeSource.PayloadType).Msg("unknown payload type")
+					log.Warn().Uint8("PayloadType", payloadTypeSource.PayloadType).Msg("demuxer unknown payload type")
 					// we do need to consume all the packets though.
 					for range payloadTypeSource.RTP {
 					}

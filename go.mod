@@ -11,7 +11,7 @@ require (
 	github.com/pion/ion-sdk-go v0.6.1
 	github.com/pion/rtcp v1.2.9
 	github.com/pion/rtp v1.7.4
-	github.com/pion/webrtc/v3 v3.1.9
+	github.com/pion/webrtc/v3 v3.1.10
 	github.com/rs/zerolog v1.26.0
 	go.uber.org/goleak v1.1.12
 )
