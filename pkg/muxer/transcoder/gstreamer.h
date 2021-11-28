@@ -7,8 +7,6 @@
 #include <stdlib.h>
 
 extern void goHandleRtpAppSinkBuffer(void *, int, int, void *);
-extern void goHandleVideoSinkBuffer(void *, int, int, void *);
-extern void goHandleAudioSinkBuffer(void *, int, int, void *);
 
 GstElement *gstreamer_start(char *, void *);
 void gstreamer_stop(GstElement *);

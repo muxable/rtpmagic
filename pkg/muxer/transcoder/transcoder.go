@@ -8,7 +8,6 @@ package transcoder
 import "C"
 import (
 	"log"
-	"math/rand"
 	"strings"
 	"time"
 	"unsafe"
@@ -19,14 +18,12 @@ import (
 )
 
 type Transcoder struct {
-	uri             string
-	audio           *packets.Codec
-	video           *packets.Codec
-	audioPacketizer rtp.Packetizer
-	videoPacketizer rtp.Packetizer
-	gstElement      *C.GstElement
-	RTPOut          chan *rtp.Packet
-	bitrate         uint32
+	uri        string
+	audio      *packets.Codec
+	video      *packets.Codec
+	gstElement *C.GstElement
+	RTPOut     chan *rtp.Packet
+	bitrate    uint32
 }
 
 func init() {
@@ -36,12 +33,10 @@ func init() {
 
 func NewTranscoder(uri string, audio, video *packets.Codec) *Transcoder {
 	t := &Transcoder{
-		uri:             uri,
-		audio:           audio,
-		video:           video,
-		audioPacketizer: rtp.NewPacketizer(1500, uint8(audio.PayloadType), rand.Uint32(), audio.Payloader, rtp.NewRandomSequencer(), audio.ClockRate),
-		videoPacketizer: rtp.NewPacketizer(1500, uint8(video.PayloadType), rand.Uint32(), video.Payloader, rtp.NewRandomSequencer(), video.ClockRate),
-		RTPOut:          make(chan *rtp.Packet, 10),
+		uri:    uri,
+		audio:  audio,
+		video:  video,
+		RTPOut: make(chan *rtp.Packet, 10),
 	}
 	go t.start()
 	return t
@@ -65,7 +60,7 @@ func (t *Transcoder) SetVideoBitrate(bitrate uint32) {
 	} else if delta > 150_000 {
 		// process increases exceeding 150kbps
 		C.gstreamer_set_video_bitrate(t.gstElement, C.guint32(bitrate))
-		log.Printf("bitrate +%v\t%v -> %v", delta,t.bitrate, bitrate)
+		log.Printf("bitrate +%v\t%v -> %v", delta, t.bitrate, bitrate)
 		t.bitrate = bitrate
 	}
 }
@@ -126,26 +121,6 @@ func goHandleRtpAppSinkBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C
 		log.Printf("unmarshal error: %v", err)
 	}
 	t.RTPOut <- p
-}
-
-//export goHandleVideoSinkBuffer
-func goHandleVideoSinkBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
-	t := pointer.Restore(data).(*Transcoder)
-	samples := toSamples(int(duration), t.video.ClockRate)
-	log.Printf("video %d %d", duration, samples)
-	for _, p := range t.videoPacketizer.Packetize(C.GoBytes(buffer, C.int(bufferLen)), samples) {
-		t.RTPOut <- p
-	}
-}
-
-//export goHandleAudioSinkBuffer
-func goHandleAudioSinkBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
-	t := pointer.Restore(data).(*Transcoder)
-	samples := toSamples(int(duration), t.audio.ClockRate)
-	log.Printf("audio %d %d", duration, samples)
-	for _, p := range t.audioPacketizer.Packetize(C.GoBytes(buffer, C.int(bufferLen)), samples) {
-		t.RTPOut <- p
-	}
 }
 
 func toSamples(duration int, clockRate uint32) uint32 {
