@@ -102,7 +102,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 					conn := n.conns[key]
 					log.Debug().Str("Interface", key).
 						Uint32("TargetBitrate", conn.GetEstimatedBitrate()).
-						Dur("RTT", conn.Sender.SenderEstimatedRoundTripTime).
+						Str("RTT", conn.Sender.SenderEstimatedRoundTripTime.String()).
 						Float64("LossRatio", conn.Receiver.EstimatedPacketLossRatio).
 						Float64("ECNRatio", conn.Receiver.EstimatedPacketECNMarkingRatio).
 						Msg("active connection")

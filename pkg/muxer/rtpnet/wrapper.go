@@ -7,6 +7,7 @@ import (
 
 	"github.com/muxable/rtpio"
 	"github.com/muxable/rtpmagic/pkg/muxer/nack"
+	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtptools/pkg/rfc5761"
 	"github.com/muxable/rtptools/pkg/rfc8698"
 	"github.com/muxable/rtptools/pkg/rfc8888"
@@ -58,19 +59,35 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	go func() {
 		// periodically poll the receiver and notify the sender.
 		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		w.sendClockSynchronizationPacket()
 		for {
 			select {
 			case <-ticker.C:
 				report := w.Receiver.BuildFeedbackReport()
 				w.Sender.OnReceiveFeedbackReport(time.Now(), report)
+
+				w.sendClockSynchronizationPacket()
 			case <-done:
-				ticker.Stop()
 				return
 			}
 		}
 	}()
 
 	return w
+}
+
+func (w *CCWrapper) sendClockSynchronizationPacket() {
+	senderClockPacket, err := packets.NewSenderClockRawPacket(time.Now())
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create sender clock packet")
+		return
+	}
+	if _, err := w.rtcpWriter.WriteRTCP([]rtcp.Packet{&senderClockPacket}); err != nil {
+		log.Error().Err(err).Msg("failed to write sender clock packet")
+		return
+	}
 }
 
 func (w *CCWrapper) ReadRTP(pkt *rtp.Packet) (int, error) {
@@ -102,19 +119,6 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 	// check if this packet is cc packet.
 	for _, pkt := range pkts {
 		switch pkt := pkt.(type) {
-		case *rtcp.ReceiverReport:
-			rtpTime := uint32(x_time.GoTimeToNTP(time.Now()) >> 16)
-			for _, report := range pkt.Reports {
-				// since rtt is ssrc independent it doesn't matter which report we use.
-				if report.LastSenderReport == 0 {
-					continue
-				}
-				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
-				rtt := x_time.NTPToGoDuration(rtpTime-report.LastSenderReport) - delay
-				w.Enabled = true
-				w.Sender.UpdateEstimatedRoundTripTime(rtt)
-				break
-			}
 		case *rtcp.RawPacket:
 			if pkt.Header().Type == rtcp.TypeTransportSpecificFeedback &&
 				pkt.Header().Count == rfc8888.FormatCCFB {
@@ -150,6 +154,17 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 						log.Warn().Msgf("cc receiver error: %v", err)
 					}
 				}
+			} else if pkt.Header().Type == rtcp.TypeTransportSpecificFeedback &&
+				pkt.Header().Count == 30 {
+				report := &packets.ReceiverClock{}
+				if err := report.Unmarshal([]byte(*pkt)[4:]); err != nil {
+					return n, err
+				}
+				rtpTime := uint32(x_time.GoTimeToNTP(time.Now()) >> 16)
+				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
+				rtt := x_time.NTPToGoDuration(rtpTime-uint32(report.LastSenderNTPTime)) - delay
+				w.Enabled = true
+				w.Sender.UpdateEstimatedRoundTripTime(rtt)
 			}
 		}
 	}

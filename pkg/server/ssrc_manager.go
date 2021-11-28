@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/muxable/rtpio"
+	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/muxable/rtptools/pkg/rfc8698"
 	"github.com/muxable/rtptools/pkg/rfc8888"
+	"github.com/muxable/rtptools/pkg/x_time"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -33,6 +35,8 @@ type SSRCManager struct {
 	sources map[webrtc.SSRC]*net.UDPAddr
 
 	ccfb map[string]*ccfb
+
+	rtcpWriter rtpio.RTCPWriter
 }
 
 var udpOOBSize = func() int {
@@ -46,17 +50,19 @@ var udpOOBSize = func() int {
 
 // NewSSRCManager wraps a net.UDPConn and provides a way to track the SSRCs of the sender.
 func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTPReader, rtpio.RTCPReader, rtpio.RTCPWriter) {
+	rfc8698.EnableExplicitCongestionNotification(conn)
+
+	rtpReader, rtpWriter := rtpio.RTPPipe()
+	rtcpReader, rtcpWriter := rtpio.RTCPPipe()
+
 	m := &SSRCManager{
 		ctx:     ctx,
 		conn:    conn,
 		sources: make(map[webrtc.SSRC]*net.UDPAddr),
 		ccfb:    make(map[string]*ccfb),
+		rtcpWriter: rtcpWriter,
 	}
 
-	rfc8698.EnableExplicitCongestionNotification(conn)
-
-	rtpReader, rtpWriter := rtpio.RTPPipe()
-	rtcpReader, rtcpWriter := rtpio.RTCPPipe()
 
 	ccTicker := time.NewTicker(100 * time.Millisecond)
 	done := make(chan bool, 1)
@@ -72,12 +78,12 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 					if len(payload) == 8 {
 						continue
 					}
-					buf := make([]byte, len(payload) + 8)
+					buf := make([]byte, len(payload)+8)
 					header := rtcp.Header{
 						Padding: false,
-						Count: 11,
-						Type: rtcp.TypeTransportSpecificFeedback,
-						Length: uint16(len(payload) / 4) + 1,
+						Count:   11,
+						Type:    rtcp.TypeTransportSpecificFeedback,
+						Length:  uint16(len(payload)/4) + 1,
 					}
 					hData, err := header.Marshal()
 					if err != nil {
@@ -107,20 +113,15 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 			if err != nil {
 				return
 			}
+			ts := time.Now()
 			h := &rtcp.Header{}
 			if err := h.Unmarshal(buf[:n]); err != nil {
 				// not a valid rtp/rtcp packet.
 				continue
 			}
 			if h.Type >= 200 && h.Type <= 207 {
-				// it's an rtcp packet.
-				cp, err := rtcp.Unmarshal(buf[:n])
-				if err != nil {
-					// not a valid rtcp packet.
-					continue
-				}
-				if _, err := rtcpWriter.WriteRTCP(cp); err != nil {
-					continue
+				if err := m.handleRTCP(sender, buf[:n], ts); err != nil {
+					log.Error().Err(err).Msg("failed to handle rtcp packet")
 				}
 			} else {
 				p := &rtp.Packet{}
@@ -167,6 +168,58 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 		}
 	}()
 	return rtpReader, rtcpReader, m
+}
+
+func (m *SSRCManager) handleRTCP(sender *net.UDPAddr, buf []byte, ts time.Time) error {
+	// it's an rtcp packet.
+	cp, err := rtcp.Unmarshal(buf)
+	if err != nil {
+		// not a valid rtcp packet.
+		return err
+	}
+	// if it's a sender clock report, immediately respond with a receiver clock report.
+	// additionally, by contract sender clocks are sent in separate packets so we don't forward.
+	for _, p := range cp {
+		switch p := p.(type) {
+		case *rtcp.RawPacket:
+			if p.Header().Type == rtcp.TypeTransportSpecificFeedback &&
+				p.Header().Count == 29 {
+				senderClockReport := &packets.SenderClock{}
+				if err := senderClockReport.Unmarshal([]byte(*p)[4:]); err != nil {
+					return err
+				}
+				receiverClockReport := packets.ReceiverClock{
+					LastSenderNTPTime: senderClockReport.SenderNTPTime,
+					Delay:             x_time.GoDurationToNTP(time.Since(ts)),
+				}
+				payload, err := receiverClockReport.Marshal()
+				if err != nil {
+					return err
+				}
+				buf := make([]byte, len(payload)+4)
+				header := rtcp.Header{
+					Padding: false,
+					Count:   30,
+					Type:    rtcp.TypeTransportSpecificFeedback,
+					Length:  uint16(len(payload) / 4),
+				}
+				hData, err := header.Marshal()
+				if err != nil {
+					return err
+				}
+				copy(buf, hData)
+				copy(buf[len(hData):], payload)
+				if _, err := m.conn.WriteToUDP(buf, sender); err != nil {
+					log.Error().Err(err).Msg("failed to send congestion control packet")
+				}
+				return nil
+			}
+		}
+	}
+	if _, err := m.rtcpWriter.WriteRTCP(cp); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Write writes to the connection sending to only senders that have sent to that ssrc.
