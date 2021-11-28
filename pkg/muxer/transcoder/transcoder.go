@@ -47,6 +47,19 @@ func NewTranscoder(uri string, audio, video *packets.Codec) *Transcoder {
 	return t
 }
 
+func isNvvidconvSupported() bool {
+	nvvidconv := C.CString("nvvidconv")
+	defer C.free(unsafe.Pointer(nvvidconv))
+	return C.gst_element_factory_find(nvvidconv) != nil
+}
+
+func getVideoConverter() string {
+	if isNvvidconvSupported() {
+		return "nvvidconv interpolation-method=5"
+	}
+	return "videoconvert"
+}
+
 func (t *Transcoder) SetVideoBitrate(bitrate uint32) {
 	// we gate bitrate increases because changing the bitrate causes visible artifacts on the gst encoder.
 	// smoothing these out allows us to produce fewer artifacts on stream.
@@ -70,7 +83,7 @@ func (t *Transcoder) getPipelineStr() (string, error) {
 			demux. ! queue ! audioconvert !
 				opusenc inband-fec=true packet-loss-percentage=8 !
 				rtpopuspay pt=111 ! appsink name=audio_sink
-			demux. ! queue ! videoconvert !
+			demux. ! queue ! ` + getVideoConverter() + ` !
 				vp8enc error-resilient=2 keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=video_encode !
 				rtpvp8pay pt=96 ! appsink name=video_sink`, nil
 	} else if strings.HasPrefix(t.uri, "v4l2://") {
@@ -82,7 +95,7 @@ func (t *Transcoder) getPipelineStr() (string, error) {
 			alsasrc device=hw:2 ! audioconvert !
 				opusenc inband-fec=true packet-loss-percentage=8 !
 				rtpopuspay pt=111 ! appsink name=audio_sink
-			v4l2src device="` + deviceName + `" ! videoconvert !
+			v4l2src device="` + deviceName + `" ! ` + getVideoConverter() + ` !
 				vp8enc error-resilient=2 keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=video_encode !
 				rtpvp8pay pt=96 ! appsink name=video_sink`, nil
 	}
