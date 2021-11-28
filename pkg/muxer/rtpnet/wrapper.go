@@ -24,10 +24,10 @@ type CCWrapper struct {
 	rtpWriter  rtpio.RTPWriter
 	rtcpWriter rtpio.RTCPWriter
 
-	ccSender   *rfc8698.Sender
-	ccReceiver *rfc8698.Receiver
-	ccBuffer   *nack.SendBuffer
-	ccSeq      uint16
+	Sender   *rfc8698.Sender
+	Receiver *rfc8698.Receiver
+	ccBuffer *nack.SendBuffer
+	ccSeq    uint16
 
 	done chan bool
 }
@@ -47,8 +47,8 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 		rtcpReader: rtcpReader,
 		rtpWriter:  rtpWriter,
 		rtcpWriter: rtcpWriter,
-		ccSender:   rfc8698.NewSender(now, config),
-		ccReceiver: rfc8698.NewReceiver(now, config),
+		Sender:     rfc8698.NewSender(now, config),
+		Receiver:   rfc8698.NewReceiver(now, config),
 		ccBuffer:   nack.NewSendBuffer(14),
 		done:       done,
 	}
@@ -59,8 +59,8 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 		for {
 			select {
 			case <-ticker.C:
-				report := w.ccReceiver.BuildFeedbackReport()
-				w.ccSender.OnReceiveFeedbackReport(time.Now(), report)
+				report := w.Receiver.BuildFeedbackReport()
+				w.Sender.OnReceiveFeedbackReport(time.Now(), report)
 			case <-done:
 				ticker.Stop()
 				return
@@ -107,9 +107,9 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 				if report.LastSenderReport == 0 {
 					continue
 				}
-				delay := time.Duration(float64(report.Delay)/(1<<16) * float64(time.Second))
+				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
 				rtt := x_time.NTPToGoDuration(rtpTime-report.LastSenderReport) - delay
-				w.ccSender.UpdateEstimatedRoundTripTime(rtt)
+				w.Sender.UpdateEstimatedRoundTripTime(rtt)
 				break
 			}
 		case *rtcp.RawPacket:
@@ -142,7 +142,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 						continue
 					}
 					size := rfc8698.Bits(q.MarshalSize() * 8)
-					err := w.ccReceiver.OnReceiveMediaPacket(metric.ArrivalTime, *ts, metric.SequenceNumber, metric.ECN == 0x3, size)
+					err := w.Receiver.OnReceiveMediaPacket(metric.ArrivalTime, *ts, metric.SequenceNumber, metric.ECN == 0x3, size)
 					if err != nil {
 						log.Warn().Msgf("cc receiver error: %v", err)
 					}
@@ -159,7 +159,7 @@ func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
 func (w *CCWrapper) GetEstimatedBitrate() uint32 {
-	return uint32(w.ccSender.GetTargetRate(10000))
+	return uint32(w.Sender.GetTargetRate(10000))
 }
 
 func (w *CCWrapper) Close() error {

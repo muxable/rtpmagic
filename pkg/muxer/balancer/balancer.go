@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -92,8 +93,19 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 				n.RLock()
 				// print some debugging information
 				log.Debug().Int("Connections", len(n.conns)).Msg("active connections")
-				for key, conn := range n.conns {
-					log.Debug().Str("Interface", key).Uint32("Bitrate", conn.GetEstimatedBitrate()).Msg("active connection")
+				keys := make([]string, 0, len(n.conns))
+				for key := range n.conns {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				for _, key := range keys {
+					conn := n.conns[key]
+					log.Debug().Str("Interface", key).
+						Uint32("TargetBitrate", conn.GetEstimatedBitrate()).
+						Dur("RTT", conn.Sender.SenderEstimatedRoundTripTime).
+						Float64("LossRatio", conn.Receiver.EstimatedPacketLossRatio).
+						Float64("ECNRatio", conn.Receiver.EstimatedPacketECNMarkingRatio).
+						Msg("active connection")
 				}
 				n.RUnlock()
 			case <-ctx.Done():
