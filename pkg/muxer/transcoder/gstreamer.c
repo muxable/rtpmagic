@@ -165,7 +165,10 @@ void gstreamer_stop(GstElement *pipeline)
 
 void gstreamer_set_video_bitrate(GstElement *pipeline, unsigned int bitrate)
 {
+    GstElementFactory *factory = gst_element_factory_find("nvvidconv");
     GstElement *encoder = gst_bin_get_by_name(GST_BIN(pipeline), "video_encode");
-    g_object_set(G_OBJECT(encoder), "target-bitrate", bitrate, NULL);
+    // detect jetson nano with nvvidconv
+    g_object_set(G_OBJECT(encoder), factory == NULL ? "target-bitrate" : "bitrate", bitrate, NULL);
     gst_object_unref(encoder);
+    gst_object_unref(factory);
 }
