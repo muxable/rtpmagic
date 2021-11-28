@@ -1,6 +1,7 @@
 package sender
 
 import (
+	"github.com/muxable/rtpio"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtp"
@@ -21,7 +22,7 @@ var e = sdk.NewEngine(sdk.Config{
 	},
 })
 
-func NewRTPSender(addr string, rid string, uid string, codec *packets.Codec, rtpIn chan *rtp.Packet) error {
+func NewRTPSender(addr string, rid string, uid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
 	c, err := sdk.NewClient(e, addr, uid)
 	if err != nil {
 		return err
@@ -48,16 +49,16 @@ func NewRTPSender(addr string, rid string, uid string, codec *packets.Codec, rtp
 		return err
 	}
 
-	go func() {
-		for p := range rtpIn {
-			if err := track.WriteRTP(p); err != nil {
-				log.Warn().Err(err).Msg("failed to write sample")
-			}
+	defer peerConnection.Close()
+	for {
+		p := &rtp.Packet{}
+		if _, err := rtpIn.ReadRTP(p); err != nil {
+			return nil
 		}
-		peerConnection.Close()
-	}()
-
-	return nil
+		if err := track.WriteRTP(p); err != nil {
+			log.Warn().Err(err).Msg("failed to write sample")
+		}
+	}
 }
 
 func processRTCP(rtpSender *webrtc.RTPSender) {

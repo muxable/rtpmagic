@@ -1,8 +1,8 @@
 package nack
 
 import (
-	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pion/rtp"
 )
@@ -12,42 +12,30 @@ const (
 )
 
 type SendBuffer struct {
-	packets   []*rtp.Packet
-	size      uint16
-	lastAdded uint16
-	started   bool
+	sync.RWMutex
 
-	m sync.RWMutex
+	packets    []*rtp.Packet
+	timestamps []*time.Time
+	size       uint16
+	lastAdded  uint16
+	started    bool
 }
 
-func NewSendBuffer(size uint16) (*SendBuffer, error) {
-	allowedSizes := make([]uint16, 0)
-	correctSize := false
-	for i := 0; i < 16; i++ {
-		if size == 1<<i {
-			correctSize = true
-			break
-		}
-		allowedSizes = append(allowedSizes, 1<<i)
-	}
-
-	if !correctSize {
-		return nil, fmt.Errorf("%d is not a valid size, allowed sizes: %v", size, allowedSizes)
-	}
-
+func NewSendBuffer(size uint16) *SendBuffer {
 	return &SendBuffer{
-		packets: make([]*rtp.Packet, size),
-		size:    size,
-	}, nil
+		packets:    make([]*rtp.Packet, 1 << size),
+		timestamps: make([]*time.Time, 1 << size),
+		size:       1 << size,
+	}
 }
 
-func (s *SendBuffer) Add(packet *rtp.Packet) {
-	s.m.Lock()
-	defer s.m.Unlock()
+func (s *SendBuffer) Add(seq uint16, ts time.Time, packet *rtp.Packet) {
+	s.Lock()
+	defer s.Unlock()
 
-	seq := packet.SequenceNumber
 	if !s.started {
 		s.packets[seq%s.size] = packet
+		s.timestamps[seq%s.size] = &ts
 		s.lastAdded = seq
 		s.started = true
 		return
@@ -59,25 +47,27 @@ func (s *SendBuffer) Add(packet *rtp.Packet) {
 	} else if diff < uint16SizeHalf {
 		for i := s.lastAdded + 1; i != seq; i++ {
 			s.packets[i%s.size] = nil
+			s.timestamps[i%s.size] = nil
 		}
 	}
 
 	s.packets[seq%s.size] = packet
+	s.timestamps[seq%s.size] = &ts
 	s.lastAdded = seq
 }
 
-func (s *SendBuffer) Get(seq uint16) *rtp.Packet {
-	s.m.RLock()
-	defer s.m.RUnlock()
+func (s *SendBuffer) Get(seq uint16) (*time.Time, *rtp.Packet) {
+	s.RLock()
+	defer s.RUnlock()
 
 	diff := s.lastAdded - seq
 	if diff >= uint16SizeHalf {
-		return nil
+		return nil, nil
 	}
 
 	if diff >= s.size {
-		return nil
+		return nil, nil
 	}
 
-	return s.packets[seq%s.size]
+	return s.timestamps[seq%s.size], s.packets[seq%s.size]
 }

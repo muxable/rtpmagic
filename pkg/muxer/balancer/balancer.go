@@ -6,25 +6,37 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muxable/rtpio"
+	"github.com/muxable/rtpmagic/pkg/muxer/rtpnet"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/rs/zerolog/log"
 )
 
 type BalancedUDPConn struct {
 	sync.RWMutex
 
-	addr              *net.UDPAddr
-	conns *ConnectionMap
-	readCh            chan []byte
-	ticker            *time.Ticker
+	rtpio.RTPReadWriteCloser
+	rtpio.RTCPReadWriteCloser
+
+	addr       *net.UDPAddr
+	conns      *ConnectionMap
+	seq        map[*net.UDPConn]uint16
+	readRTPCh  chan *rtp.Packet
+	readRTCPCh chan []rtcp.Packet
+	ticker     *time.Ticker
 }
+
+const defaultHdrExtID = 5
 
 func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*BalancedUDPConn, error) {
 	ticker := time.NewTicker(pollingInterval)
 	n := &BalancedUDPConn{
-		addr:              addr,
-		conns: NewConnectionMap(),
-		readCh:            make(chan []byte, 128),
-		ticker:            ticker,
+		addr:       addr,
+		conns:      NewConnectionMap(),
+		readRTPCh:  make(chan *rtp.Packet, 128),
+		readRTCPCh: make(chan []rtcp.Packet, 128),
+		ticker:     ticker,
 	}
 	go func() {
 		for ok := true; ok; _, ok = <-ticker.C {
@@ -41,8 +53,10 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 					if err != nil {
 						log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 					}
-					go readLoop(conn, n.readCh)
-					n.conns.Set(device, conn)
+					wrapped := rtpnet.NewCCWrapper(conn, 1500)
+					go readRTPLoop(wrapped, n.readRTPCh)
+					go readRTCPLoop(wrapped, n.readRTCPCh)
+					n.conns.Set(device, wrapped)
 					log.Info().Msgf("connected to %s via %s", addr, device)
 				}
 			}
@@ -63,45 +77,82 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 	return n, nil
 }
 
-// reconnect reconnects a specific index.
-func readLoop(conn *net.UDPConn, readCh chan []byte) {
+func readRTPLoop(conn *rtpnet.CCWrapper, readCh chan *rtp.Packet) {
 	for {
-		buf := make([]byte, 1500)
-		len, err := conn.Read(buf)
-		if err != nil {
+		p := &rtp.Packet{}
+		if _, err := conn.ReadRTP(p); err != nil {
 			log.Warn().Msgf("failed to read: %v", err)
 			return
 		}
-		readCh <- buf[:len]
+		readCh <- p
 	}
 }
 
-// Read reads from the read channel.
-func (n *BalancedUDPConn) Read(b []byte) (int, error) {
-	buf, ok := <-n.readCh
+func readRTCPLoop(conn *rtpnet.CCWrapper, readCh chan []rtcp.Packet) {
+	for {
+		pkts := make([]rtcp.Packet, 16)
+		if _, err := conn.ReadRTCP(pkts); err != nil {
+			log.Warn().Msgf("failed to read: %v", err)
+			return
+		}
+		readCh <- pkts
+	}
+}
+
+// ReadRTP reads from the read channel.
+func (n *BalancedUDPConn) ReadRTP(p *rtp.Packet) (int, error) {
+	q, ok := <-n.readRTPCh
 	if !ok {
 		return 0, io.EOF
 	}
-	copy(b, buf)
-	return len(buf), nil
+	*p = *q
+	return q.MarshalSize(), nil
 }
 
-func (n *BalancedUDPConn) Write(data []byte) (int, error) {
+// ReadRTCP reads an RTCP packet.
+func (n *BalancedUDPConn) ReadRTCP(pkts []rtcp.Packet) (int, error) {
+	q, ok := <-n.readRTCPCh
+	if !ok {
+		return 0, io.EOF
+	}
+	return copy(pkts, q), nil
+}
+
+// WriteRTP writes an RTP packet.
+func (n *BalancedUDPConn) WriteRTP(p *rtp.Packet) (int, error) {
 	n.RLock()
 	defer n.RUnlock()
 
 	_, conn := n.conns.Random()
-	if _, err := conn.Write(data); err != nil {
-		log.Warn().Err(err).Msg("failed to write")
+	return conn.WriteRTP(p)
+}
+
+// WriteRTCP writes an RTCP packet.
+func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
+	n.RLock()
+	defer n.RUnlock()
+
+	_, conn := n.conns.Random()
+	return conn.WriteRTCP(pkts)
+}
+
+// GetEstimatedBitrate gets the estimated bitrate of the sender.
+func (n *BalancedUDPConn) GetEstimatedBitrate() uint32 {
+	n.RLock()
+	defer n.RUnlock()
+
+	total := uint32(0)
+	for _, conn := range n.conns.Items() {
+		total += conn.GetEstimatedBitrate()
 	}
-	return len(data), nil
+	return total
 }
 
 // Close closes all active connections.
 func (n *BalancedUDPConn) Close() error {
 	n.Lock()
 	defer n.Unlock()
-	close(n.readCh)
+	close(n.readRTPCh)
 	n.ticker.Stop()
 	n.conns.Close()
 	return nil

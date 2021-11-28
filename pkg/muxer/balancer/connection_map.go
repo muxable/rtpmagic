@@ -2,27 +2,28 @@ package balancer
 
 import (
 	"math/rand"
-	"net"
 	"sync"
+
+	"github.com/muxable/rtpmagic/pkg/muxer/rtpnet"
 )
 
 type ConnectionMap struct {
 	sync.RWMutex
 
-	container     map[string]*net.UDPConn
+	container     map[string]*rtpnet.CCWrapper
 	keys          []string
 	sliceKeyIndex map[string]int
 }
 
 func NewConnectionMap() *ConnectionMap {
 	return &ConnectionMap{
-		container:     make(map[string]*net.UDPConn),
+		container:     make(map[string]*rtpnet.CCWrapper),
 		sliceKeyIndex: make(map[string]int),
 	}
 }
 
 // Set sets the key to a given connection.
-func (m *ConnectionMap) Set(key string, conn *net.UDPConn) {
+func (m *ConnectionMap) Set(key string, conn *rtpnet.CCWrapper) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -32,7 +33,7 @@ func (m *ConnectionMap) Set(key string, conn *net.UDPConn) {
 }
 
 // Get gets the connection for a given key.
-func (m *ConnectionMap) Get(key string) *net.UDPConn {
+func (m *ConnectionMap) Get(key string) *rtpnet.CCWrapper {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -49,10 +50,10 @@ func (m *ConnectionMap) Has(key string) bool {
 }
 
 // Keys returns a slice of all keys.
-func (m *ConnectionMap) Items() map[string]*net.UDPConn {
+func (m *ConnectionMap) Items() map[string]*rtpnet.CCWrapper {
 	m.RLock()
 	defer m.RUnlock()
-	
+
 	return m.container
 }
 
@@ -82,7 +83,7 @@ func (m *ConnectionMap) Remove(key string) {
 }
 
 // Random returns a random key/value pair.
-func (m *ConnectionMap) Random() (string, *net.UDPConn) {
+func (m *ConnectionMap) Random() (string, *rtpnet.CCWrapper) {
 	m.RLock()
 	defer m.RUnlock()
 

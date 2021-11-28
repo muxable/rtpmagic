@@ -3,71 +3,78 @@ package demuxer
 import (
 	"time"
 
-	"github.com/muxable/rtpmagic/pkg/pipeline"
+	"github.com/muxable/rtpio"
 	"github.com/pion/rtp"
-	"github.com/rs/zerolog/log"
+	"github.com/pion/webrtc/v3"
 )
 
 type PayloadTypeSource struct {
-	PayloadType uint8
-	RTP         chan *rtp.Packet
-
+	rtpWriter  rtpio.RTPWriteCloser
 	lastPacket time.Time
 }
 
 type PayloadTypeDemuxer struct {
-	ctx           pipeline.Context
-	rtpIn         chan *rtp.Packet
-	byPayloadType map[uint8]*PayloadTypeSource
-	callback      func(*PayloadTypeSource)
+	clock         func() time.Time
+	byPayloadType map[webrtc.PayloadType]*PayloadTypeSource
 }
 
 // NewPayloadTypeDemuxer creates a new PayloadTypeDemuxer
-func NewPayloadTypeDemuxer(ctx pipeline.Context, rtpIn chan *rtp.Packet, callback func(*PayloadTypeSource)) {
-
+func NewPayloadTypeDemuxer(clock func() time.Time, rtpIn rtpio.RTPReader, onNewPayloadType func(webrtc.PayloadType, rtpio.RTPReader)) {
 	d := &PayloadTypeDemuxer{
-		ctx:           ctx,
-		rtpIn:         rtpIn,
-		byPayloadType: make(map[uint8]*PayloadTypeSource),
-		callback:      callback,
+		clock:         clock,
+		byPayloadType: make(map[webrtc.PayloadType]*PayloadTypeSource),
 	}
 
 	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case p, ok := <-d.rtpIn:
-			if !ok {
+	done := make(chan bool, 1)
+
+	go func() {
+		defer ticker.Stop()
+		defer func() { done <- true }()
+		for {
+			p := &rtp.Packet{}
+			if _, err := rtpIn.ReadRTP(p); err != nil {
+				// close all the rtp writers.
+				for _, s := range d.byPayloadType {
+					s.rtpWriter.Close()
+				}
 				return
 			}
 
-			s, ok := d.byPayloadType[p.PayloadType]
+			pt := webrtc.PayloadType(p.PayloadType)
+			s, ok := d.byPayloadType[pt]
 			if !ok {
-				s = &PayloadTypeSource{
-					PayloadType: p.PayloadType,
-					RTP:         make(chan *rtp.Packet),
-				}
-				d.byPayloadType[p.PayloadType] = s
-				go d.callback(s)
+				r, w := rtpio.RTPPipe()
+				s = &PayloadTypeSource{rtpWriter: w}
+				d.byPayloadType[pt] = s
+				go onNewPayloadType(pt, r)
 			}
-			s.lastPacket = d.ctx.Clock.Now()
-			s.RTP <- p
-		case <-ticker.C:
-			d.cleanup()
+			s.lastPacket = d.clock()
+			s.rtpWriter.WriteRTP(p)
 		}
-	}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				d.cleanup()
+			case <-done:
+				return
+			}
+		}
+	}()
 }
 
 // cleanup removes any payload types that have been inactive for a while.
 func (d *PayloadTypeDemuxer) cleanup() {
-	now := d.ctx.Clock.Now()
+	now := d.clock()
 	for pt, s := range d.byPayloadType {
 		if now.Sub(s.lastPacket) > 30*time.Second {
 			// log the removal
-			log.Info().Uint8("PayloadType", pt).Msg("removing pt due to timeout")
 			delete(d.byPayloadType, pt)
 			// close the output channels
-			close(s.RTP)
+			s.rtpWriter.Close()
 		}
 	}
 }
