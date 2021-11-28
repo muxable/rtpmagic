@@ -89,11 +89,13 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 		for {
 			select {
 			case <-ticker.C:
+				n.RLock()
 				// print some debugging information
 				log.Debug().Int("Connections", len(n.conns)).Msg("active connections")
 				for key, conn := range n.conns {
 					log.Debug().Str("Interface", key).Uint32("Bitrate", conn.GetEstimatedBitrate()).Msg("active connection")
 				}
+				n.RUnlock()
 			case <-ctx.Done():
 				return
 			}
@@ -144,14 +146,14 @@ func (n *BalancedUDPConn) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 }
 
 func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
-	n.Lock()
-	defer n.Unlock()
-
 	bitrates := make(map[string]uint32)
 	total := uint32(0)
 	for key, conn := range n.conns {
 		bitrates[key] = conn.GetEstimatedBitrate()
 		total += bitrates[key]
+	}
+	if total == 0 {
+		return nil
 	}
 	index := rand.Intn(int(total))
 	for key, bitrate := range bitrates {
