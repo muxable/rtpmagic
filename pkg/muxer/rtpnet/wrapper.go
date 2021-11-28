@@ -29,6 +29,8 @@ type CCWrapper struct {
 	ccBuffer *nack.SendBuffer
 	ccSeq    uint16
 
+	Enabled bool
+
 	done chan bool
 }
 
@@ -109,6 +111,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 				}
 				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
 				rtt := x_time.NTPToGoDuration(rtpTime-report.LastSenderReport) - delay
+				w.Enabled = true
 				w.Sender.UpdateEstimatedRoundTripTime(rtt)
 				break
 			}
@@ -159,6 +162,9 @@ func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
 func (w *CCWrapper) GetEstimatedBitrate() uint32 {
+	if !w.Enabled {
+		return 0
+	}
 	return uint32(w.Sender.GetTargetRate(10000))
 }
 
