@@ -7,7 +7,6 @@ package transcoder
 */
 import "C"
 import (
-	"log"
 	"strings"
 	"time"
 	"unsafe"
@@ -15,6 +14,7 @@ import (
 	"github.com/mattn/go-pointer"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/pion/rtp"
+	"github.com/rs/zerolog/log"
 )
 
 type Transcoder struct {
@@ -55,12 +55,12 @@ func (t *Transcoder) SetVideoBitrate(bitrate uint32) {
 	if delta < -50_000 {
 		// process decreases exceeding 50kbps
 		C.gstreamer_set_video_bitrate(t.gstElement, C.guint32(bitrate))
-		log.Printf("bitrate %v\t%v -> %v", delta, t.bitrate, bitrate)
+		log.Info().Uint32("PreviousBitrate", t.bitrate).Uint32("NewBitrate", bitrate).Int64("Δ", delta).Msg("updating encoder bitrate")
 		t.bitrate = bitrate
 	} else if delta > 150_000 {
 		// process increases exceeding 150kbps
 		C.gstreamer_set_video_bitrate(t.gstElement, C.guint32(bitrate))
-		log.Printf("bitrate +%v\t%v -> %v", delta, t.bitrate, bitrate)
+		log.Info().Uint32("PreviousBitrate", t.bitrate).Uint32("NewBitrate", bitrate).Int64("Δ", delta).Msg("updating encoder bitrate")
 		t.bitrate = bitrate
 	}
 }

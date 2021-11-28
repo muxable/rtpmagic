@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -20,6 +21,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -34,6 +36,8 @@ import (
 // - pt muxer (implicit)
 // - sender
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	from := flag.String("from", "0.0.0.0:5000", "The address to receive from")
 	to := flag.String("to", "34.72.248.242:50051", "The address to send to")
 	flag.Parse()

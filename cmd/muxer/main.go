@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/muxable/rtpmagic/test/netsim"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,6 +45,8 @@ func dial(destination string, useNetsim bool) (MuxerUDPConn, error) {
 // encode audio and video
 // broadcast rtp
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	uri := flag.String("uri", "testbin://audio+video", "source uri")
 	cname := flag.String("cname", "mugit", "cname to send as")
 	netsim := flag.Bool("netsim", false, "use netsim connection")
@@ -76,6 +80,10 @@ func main() {
 			time.Sleep(250 * time.Millisecond)
 			targetBitrate := conn.GetEstimatedBitrate()
 			// subtract off 64 kbps because it's reserved for audio.
+			if targetBitrate < 164_000 {
+				// well we're in trouble...
+				targetBitrate = 100_000
+			}
 			pipeline.SetVideoBitrate(targetBitrate - 64000)
 		}
 	}()
@@ -109,7 +117,7 @@ func NewPipeline(conn MuxerUDPConn, uri string, audioCodec *packets.Codec, video
 		videoSendBuffer:   nack.NewSendBuffer(14),
 		audioSenderStream: reports.NewSenderStream(audioCodec.ClockRate),
 		videoSenderStream: reports.NewSenderStream(videoCodec.ClockRate),
-		cname: cname,
+		cname:             cname,
 	}
 
 	go p.writeRTCPLoop()
