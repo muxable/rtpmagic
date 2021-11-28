@@ -65,7 +65,7 @@ func (t *Transcoder) SetVideoBitrate(bitrate uint32) {
 }
 
 func (t *Transcoder) getPipelineStr() (string, error) {
-	if strings.HasPrefix(t.uri, "rtmp://") {
+	if strings.HasPrefix(t.uri, "rtmp://") || strings.HasPrefix(t.uri, "testbin://") {
 		return `uridecodebin uri="` + t.uri + `" name=demux
 			demux. ! queue ! audioconvert !
 				opusenc inband-fec=true packet-loss-percentage=8 !
