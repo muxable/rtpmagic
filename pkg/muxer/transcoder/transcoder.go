@@ -72,8 +72,8 @@ func (t *Transcoder) getPipelineStr() (string, error) {
 				demux. ! queue ! audioconvert !
 					opusenc inband-fec=true packet-loss-percentage=8 !
 					rtpopuspay pt=111 ! appsink name=audio_sink
-				demux. ! queue ! videoconvert !
-					nvv4l2vp8enc maxperf-enable=true preset-level=1 error-resilient=2 keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=video_encode !
+				demux. ! queue ! nvvidconv !
+					nvv4l2vp8enc maxperf-enable=true preset-level=1 name=video_encode !
 					rtpvp8pay pt=96 ! appsink name=video_sink`, nil
 		} else {
 			// this is mostly here for debugging.
@@ -94,8 +94,8 @@ func (t *Transcoder) getPipelineStr() (string, error) {
 			alsasrc device=hw:2 ! audioconvert !
 				opusenc inband-fec=true packet-loss-percentage=8 !
 				rtpopuspay pt=111 ! appsink name=audio_sink
-			v4l2src device="` + deviceName + `" ! videoconvert !
-				vp8enc error-resilient=2 keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=video_encode !
+			v4l2src device="` + deviceName + `" ! nvvidconv !
+					nvv4l2vp8enc maxperf-enable=true preset-level=1 name=video_encode !
 				rtpvp8pay pt=96 ! appsink name=video_sink`, nil
 	}
 	return "", nil
