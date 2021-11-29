@@ -196,18 +196,10 @@ func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 	defer n.RUnlock()
 
 	// forward RTCP packets go to *every* connection.
-	written := false
-	for _, conn := range n.conns {
-		if _, err := conn.WriteRTCP(pkts); err != nil {
-			log.Warn().Err(err).Msgf("failed to write rtcp")
-		} else {
-			written = true
-		}
+	if conn := n.randomConn(); conn != nil {
+		return conn.WriteRTCP(pkts)
 	}
-	if !written {
-		return 0, errNoConnection
-	}
-	return len(pkts), nil
+	return 0, errNoConnection
 }
 
 // GetEstimatedBitrate gets the estimated bitrate of the sender.
