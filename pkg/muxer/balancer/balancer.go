@@ -55,7 +55,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 				// add any interfaces that are not already active.
 				for device := range devices {
 					if _, ok := n.conns[device]; !ok {
-						conn, err := net.DialUDP("udp", nil, addr)
+						conn, err := DialUDPWithRetry(addr)
 						if err != nil {
 							log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 						}
