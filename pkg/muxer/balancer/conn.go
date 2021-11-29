@@ -3,14 +3,12 @@ package balancer
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
 type UDPConnWithRetry struct {
-	sync.RWMutex
 	*net.UDPConn
 	to *net.UDPAddr
 
@@ -64,23 +62,37 @@ func (c *UDPConnWithRetry) dial() error {
 	return nil
 }
 
-func (c *UDPConnWithRetry) Write(b []byte) (int, error) {
-	c.RLock()
-	defer c.RUnlock()
-
-	return c.UDPConn.Write(b)
+func (c *UDPConnWithRetry) WriteWithRetries(b []byte, retries int) (int, error) {
+	n, err := c.UDPConn.Write(b)
+	if err != nil {
+		if retries > 0 {
+			time.Sleep(100 * time.Millisecond)
+			return c.WriteWithRetries(b, retries-1)
+		}
+		return n, err
+	}
+	return n, nil
 }
 
-func (c *UDPConnWithRetry) Read(b []byte) (int, error) {
-	c.Lock()
-	defer c.Unlock()
+func (c *UDPConnWithRetry) Write(b []byte) (int, error) {
+	return c.WriteWithRetries(b, 3)
+}
 
+func (c *UDPConnWithRetry) ReadWithRetries(b []byte, retries int) (int, error) {
 	n, err := c.UDPConn.Read(b)
 	if err != nil {
+		if retries > 0 {
+			time.Sleep(100 * time.Millisecond)
+			return c.ReadWithRetries(b, retries-1)
+		}
 		return n, err
 	}
 	c.lastRead = time.Now()
 	return n, nil
+}
+
+func (c *UDPConnWithRetry) Read(b []byte) (int, error) {
+	return c.ReadWithRetries(b, 3)
 }
 
 func (c *UDPConnWithRetry) Close() error {
