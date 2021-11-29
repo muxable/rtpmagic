@@ -63,7 +63,9 @@ func (c *UDPConnWithRetry) dial() error {
 }
 
 func (c *UDPConnWithRetry) WriteWithRetries(b []byte, retries int) (int, error) {
-	n, err := c.UDPConn.Write(b)
+	conn := c.UDPConn
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	n, err := conn.Write(b)
 	if err != nil {
 		if retries > 0 {
 			time.Sleep(100 * time.Millisecond)
@@ -79,7 +81,9 @@ func (c *UDPConnWithRetry) Write(b []byte) (int, error) {
 }
 
 func (c *UDPConnWithRetry) ReadWithRetries(b []byte, retries int) (int, error) {
-	n, err := c.UDPConn.Read(b)
+	conn := c.UDPConn
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err := conn.Read(b)
 	if err != nil {
 		if retries > 0 {
 			time.Sleep(100 * time.Millisecond)
