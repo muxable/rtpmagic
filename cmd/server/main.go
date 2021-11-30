@@ -15,10 +15,10 @@ import (
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/muxable/rtpmagic/pkg/server"
 	demuxer "github.com/muxable/rtpmagic/pkg/server/1_demuxer"
-	sender "github.com/muxable/rtpmagic/pkg/server/3_sender"
 	"github.com/muxable/rtptools/pkg/report"
 	"github.com/muxable/rtptools/pkg/rfc7005"
 	"github.com/muxable/rtptools/pkg/x_ssrc"
+	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -87,6 +87,15 @@ func main() {
 	rtpReader, rtcpReader, rtcpWriter := server.NewSSRCManager(ctx, conn, 1500)
 
 	senderSSRC := rand.Uint32()
+	
+	connector := sdk.NewConnector(*to)
+	rtc := sdk.NewRTC(connector, sdk.DefaultConfig)
+
+	rid := "mugit"
+
+	if err := rtc.Join(rid, rid, sdk.NewJoinConfig().SetNoSubscribe()); err != nil {
+		panic(err)
+	}
 
 	x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
 		demuxer.NewPayloadTypeDemuxer(ctx.Clock.Now, rtpIn, func(pt webrtc.PayloadType, rtpIn rtpio.RTPReader) {
@@ -139,9 +148,28 @@ func main() {
 			log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
 
 			identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
-			if err := sender.NewRTPSender(*to, "mugit", identity, codec, jbRTP); err != nil {
+			if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
 				log.Error().Err(err).Msg("sender terminated")
 			}
 		})
 	})
+}
+
+func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
+	track, err := webrtc.NewTrackLocalStaticRTP(codec.RTPCodecCapability, tid, tid)
+	if err != nil {
+		return err
+	}
+	if _, err := rtc.Publish(track); err != nil {
+		return err
+	}
+	for {
+		p := &rtp.Packet{}
+		if _, err := rtpIn.ReadRTP(p); err != nil {
+			return nil
+		}
+		if err := track.WriteRTP(p); err != nil {
+			log.Warn().Err(err).Msg("failed to write sample")
+		}
+	}
 }
