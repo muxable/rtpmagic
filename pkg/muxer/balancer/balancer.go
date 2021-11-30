@@ -57,14 +57,17 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 				// add any interfaces that are not already active.
 				for device := range devices {
 					if _, ok := n.conns[device]; !ok {
-						conn, err := DialWithErrorHandler(addr, func() {
-							cleanup.Store(device, true)
-						})
+						conn, err := DialVia(addr, device)
 						if err != nil {
 							log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 							continue
 						}
-						wrapped := rtpnet.NewCCWrapper(conn, 1500)
+						wrapped := rtpnet.NewCCWrapper(&UDPConnWithErrorHandler{
+							UDPConn: conn,
+							onError: func() {
+								cleanup.Store(device, true)
+							},
+						}, 1500)
 						go readRTPLoop(wrapped, n.readRTPCh)
 						go readRTCPLoop(wrapped, n.readRTCPCh)
 						n.conns[device] = wrapped
