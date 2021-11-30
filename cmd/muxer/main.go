@@ -169,6 +169,7 @@ func (p *Pipeline) Start() {
 			p.videoSSRC = webrtc.SSRC(pkt.SSRC)
 			p.videoSendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 			if p.videoDebugOut != nil {
+				log.Printf("writing debug packet")
 				buf, err := pkt.Marshal()
 				if err != nil {
 					log.Error().Err(err).Msg("failed to marshal rtp")
@@ -181,6 +182,7 @@ func (p *Pipeline) Start() {
 			p.audioSSRC = webrtc.SSRC(pkt.SSRC)
 			p.audioSendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 			if p.audioDebugOut != nil {
+				log.Printf("writing debug packet")
 				buf, err := pkt.Marshal()
 				if err != nil {
 					log.Error().Err(err).Msg("failed to marshal rtp")
