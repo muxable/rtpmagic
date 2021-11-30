@@ -61,14 +61,20 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
-		w.sendClockSynchronizationPacket()
+		if err := w.sendClockSynchronizationPacket(); err != nil {
+			log.Error().Err(err).Msg("failed to send clock synchronization packet")
+			return
+		}
 		for {
 			select {
 			case <-ticker.C:
 				report := w.Receiver.BuildFeedbackReport()
 				w.Sender.OnReceiveFeedbackReport(time.Now(), report)
 
-				w.sendClockSynchronizationPacket()
+				if err := w.sendClockSynchronizationPacket(); err != nil {
+					log.Error().Err(err).Msg("failed to send clock synchronization packet")
+					return
+				}
 			case <-done:
 				return
 			}
@@ -78,16 +84,15 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	return w
 }
 
-func (w *CCWrapper) sendClockSynchronizationPacket() {
+func (w *CCWrapper) sendClockSynchronizationPacket() error {
 	senderClockPacket, err := packets.NewSenderClockRawPacket(time.Now())
 	if err != nil {
-		log.Error().Err(err).Msg("failed to create sender clock packet")
-		return
+		return err
 	}
 	if _, err := w.rtcpWriter.WriteRTCP([]rtcp.Packet{&senderClockPacket}); err != nil {
-		log.Error().Err(err).Msg("failed to write sender clock packet")
-		return
+		return err
 	}
+	return nil
 }
 
 func (w *CCWrapper) ReadRTP(pkt *rtp.Packet) (int, error) {
