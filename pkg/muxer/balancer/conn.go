@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"net"
-	"time"
 )
 
 type UDPConnWithErrorHandler struct {
@@ -14,7 +13,6 @@ type UDPConnWithErrorHandler struct {
 }
 
 func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
-	c.UDPConn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 	n, err := c.UDPConn.Write(b)
 	if err != nil {
 		if c.errored {
@@ -27,7 +25,6 @@ func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 }
 
 func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
-	c.UDPConn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	n, err := c.UDPConn.Read(b)
 	if err != nil {
 		if c.errored {
