@@ -62,6 +62,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 						})
 						if err != nil {
 							log.Warn().Msgf("failed to connect to %s: %v", addr, err)
+							continue
 						}
 						wrapped := rtpnet.NewCCWrapper(conn, 1500)
 						go readRTPLoop(wrapped, n.readRTPCh)
