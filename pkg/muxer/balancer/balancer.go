@@ -43,7 +43,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 		ticker := time.NewTicker(pollingInterval)
 		defer ticker.Stop()
 		// this table is to prevent deadlocking for cleanups.
-		cleanup := make(map[string]bool)
+		cleanup := sync.Map{}
 		for {
 			select {
 			case <-ticker.C:
@@ -58,7 +58,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 				for device := range devices {
 					if _, ok := n.conns[device]; !ok {
 						conn, err := DialWithErrorHandler(addr, func() {
-							cleanup[device] = true
+							cleanup.Store(device, true)
 						})
 						if err != nil {
 							log.Warn().Msgf("failed to connect to %s: %v", addr, err)
@@ -72,14 +72,14 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 				}
 				// remove any interfaces that are no longer active.
 				for device, conn := range n.conns {
-					if _, ok := devices[device]; !ok || cleanup[device] {
+					_, cleanupRequested := cleanup.LoadAndDelete(device)
+					if _, ok := devices[device]; !ok || cleanupRequested {
 						// remove this interface.
 						if err := conn.Close(); err != nil {
 							log.Warn().Msgf("failed to close connection: %v", err)
 							continue
 						}
 						delete(n.conns, device)
-						delete(cleanup, device)
 						log.Info().Msgf("disconnected from %s via %s", addr, device)
 					}
 				}
