@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -36,6 +38,23 @@ import (
 // - pt muxer (implicit)
 // - sender
 func main() {
+	go func() {
+		m := http.NewServeMux()
+		m.Handle("/metrics", promhttp.Handler())
+		srv := &http.Server{
+			Handler: m,
+		}
+
+		metricsLis, err := net.Listen("tcp", ":8012")
+		if err != nil {
+			return
+		}
+
+		err = srv.Serve(metricsLis)
+		if err != nil {
+			return
+		}
+	}()
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	from := flag.String("from", "0.0.0.0:5000", "The address to receive from")
@@ -68,7 +87,7 @@ func main() {
 	rtpReader, rtcpReader, rtcpWriter := server.NewSSRCManager(ctx, conn, 1500)
 
 	senderSSRC := rand.Uint32()
- 
+
 	x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
 		demuxer.NewPayloadTypeDemuxer(ctx.Clock.Now, rtpIn, func(pt webrtc.PayloadType, rtpIn rtpio.RTPReader) {
 			// match with a codec.
@@ -89,7 +108,7 @@ func main() {
 
 			codecTicker := codec.Ticker()
 			defer codecTicker.Stop()
-			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 2 * time.Second, rtpIn)
+			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 2*time.Second, rtpIn)
 			// write nacks periodically back to the sender
 			nackTicker := time.NewTicker(150 * time.Millisecond)
 			defer nackTicker.Stop()
