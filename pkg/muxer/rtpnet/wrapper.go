@@ -117,7 +117,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 	}
 
 	// check if this packet is cc packet.
-	for _, pkt := range pkts {
+	for _, pkt := range pkts[:n] {
 		switch pkt := pkt.(type) {
 		case *rtcp.RawPacket:
 			if pkt.Header().Type == rtcp.TypeTransportSpecificFeedback &&
@@ -178,7 +178,7 @@ func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
 func (w *CCWrapper) GetEstimatedBitrate() uint32 {
 	if !w.Enabled {
-		return 0
+		return 100 // send some minimal data.
 	}
 	return uint32(w.Sender.GetTargetRate(10000))
 }

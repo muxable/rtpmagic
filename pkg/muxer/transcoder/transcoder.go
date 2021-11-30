@@ -36,7 +36,7 @@ func NewTranscoder(uri string, audio, video *packets.Codec) *Transcoder {
 		uri:    uri,
 		audio:  audio,
 		video:  video,
-		RTPOut: make(chan *rtp.Packet, 10),
+		RTPOut: make(chan *rtp.Packet, 64),
 	}
 	go t.start()
 	return t
