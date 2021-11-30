@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -50,6 +51,7 @@ func main() {
 	uri := flag.String("uri", "testbin://audio+video", "source uri")
 	cname := flag.String("cname", "mugit", "cname to send as")
 	netsim := flag.Bool("netsim", false, "use netsim connection")
+	debug := flag.String("debug", "", "enable debug rtp destination")
 	destination := flag.String("dest", "localhost:5000", "destination")
 	audioMimeType := flag.String("audio", webrtc.MimeTypeOpus, "audio mime type")
 	videoMimeType := flag.String("video", webrtc.MimeTypeVP8, "video mime type")
@@ -69,7 +71,7 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to dial")
 	}
 
-	pipeline, err := NewPipeline(conn, *uri, audioCodec, videoCodec, *cname)
+	pipeline, err := NewPipeline(conn, *uri, *debug, audioCodec, videoCodec, *cname)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create pipeline")
 	}
@@ -105,9 +107,32 @@ type Pipeline struct {
 	audioSenderStream *reports.SenderStream
 	videoSenderStream *reports.SenderStream
 	cname             string
+
+	videoDebugOut *net.UDPConn
+	audioDebugOut *net.UDPConn
 }
 
-func NewPipeline(conn MuxerUDPConn, uri string, audioCodec *packets.Codec, videoCodec *packets.Codec, cname string) (*Pipeline, error) {
+func NewPipeline(conn MuxerUDPConn, uri, debug string, audioCodec, videoCodec *packets.Codec, cname string) (*Pipeline, error) {
+	var audioDebugOut *net.UDPConn
+	var videoDebugOut *net.UDPConn
+	if debug != "" {
+		videoAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:5004", debug))
+		if err != nil {
+			return nil, err
+		}
+		videoDebugOut, err = net.DialUDP("udp", nil, videoAddr)
+		if err != nil {
+			return nil, err
+		}
+		audioAddr, err := net.ResolveUDPAddr("udp",fmt.Sprintf("%s:5006", debug))
+		if err != nil {
+			return nil, err
+		}
+		audioDebugOut, err = net.DialUDP("udp", nil, audioAddr)
+		if err != nil {
+			return nil, err
+		}
+	}
 	p := &Pipeline{
 		conn:              conn,
 		transcoder:        transcoder.NewTranscoder(uri, audioCodec, videoCodec),
@@ -118,6 +143,9 @@ func NewPipeline(conn MuxerUDPConn, uri string, audioCodec *packets.Codec, video
 		audioSenderStream: reports.NewSenderStream(audioCodec.ClockRate),
 		videoSenderStream: reports.NewSenderStream(videoCodec.ClockRate),
 		cname:             cname,
+
+		videoDebugOut: videoDebugOut,
+		audioDebugOut: audioDebugOut,
 	}
 
 	go p.writeRTCPLoop()
@@ -140,9 +168,27 @@ func (p *Pipeline) Start() {
 		case p.videoCodec.PayloadType:
 			p.videoSSRC = webrtc.SSRC(pkt.SSRC)
 			p.videoSendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
+			if p.videoDebugOut != nil {
+				buf, err := pkt.Marshal()
+				if err != nil {
+					log.Error().Err(err).Msg("failed to marshal rtp")
+				}
+				if _, err := p.videoDebugOut.Write(buf); err != nil {
+					log.Error().Err(err).Msg("failed to write video debug")
+				}
+			}
 		case p.audioCodec.PayloadType:
 			p.audioSSRC = webrtc.SSRC(pkt.SSRC)
 			p.audioSendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
+			if p.audioDebugOut != nil {
+				buf, err := pkt.Marshal()
+				if err != nil {
+					log.Error().Err(err).Msg("failed to marshal rtp")
+				}
+				if _, err := p.audioDebugOut.Write(buf); err != nil {
+					log.Error().Err(err).Msg("failed to write audio debug")
+				}
+			}
 		}
 		if _, err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
