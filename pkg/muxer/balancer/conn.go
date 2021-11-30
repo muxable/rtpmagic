@@ -21,7 +21,6 @@ func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 			return n, err
 		}
 		defer c.onError(err)
-		defer c.UDPConn.Close()
 		c.errored = true
 	}
 	return n, err
@@ -35,7 +34,6 @@ func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
 			return n, err
 		}
 		defer c.onError(err)
-		defer c.UDPConn.Close()
 		c.errored = true
 	}
 	return n, err
