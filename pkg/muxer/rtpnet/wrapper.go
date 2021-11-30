@@ -188,7 +188,7 @@ func (w *CCWrapper) GetEstimatedBitrate() uint32 {
 	if !w.Enabled {
 		return 100 // send some minimal data.
 	}
-	return uint32(w.Sender.GetTargetRate(10000))
+	return uint32(w.Sender.GetTargetRate(1000))
 }
 
 func (w *CCWrapper) Close() error {
