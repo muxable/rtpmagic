@@ -64,7 +64,8 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 						}
 						wrapped := rtpnet.NewCCWrapper(&UDPConnWithErrorHandler{
 							UDPConn: conn,
-							onError: func() {
+							onError: func(err error) {
+								log.Warn().Err(err).Msgf("udp error on %s", device)
 								cleanup.Store(device, true)
 							},
 						}, 1500)
