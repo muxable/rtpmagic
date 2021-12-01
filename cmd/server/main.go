@@ -159,11 +159,16 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 	if _, err := rtc.Publish(track); err != nil {
 		return err
 	}
+	prevSeq := uint16(0)
 	for {
 		p := &rtp.Packet{}
 		if _, err := rtpIn.ReadRTP(p); err != nil {
 			return nil
 		}
+		if p.SequenceNumber != prevSeq + 1 {
+			log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
+		}
+		prevSeq = p.SequenceNumber
 		if err := track.WriteRTP(p); err != nil {
 			log.Warn().Err(err).Msg("failed to write sample")
 		}
