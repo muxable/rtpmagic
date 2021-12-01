@@ -123,11 +123,15 @@ func main() {
 					select {
 					case <-nackTicker.C:
 						missing := jb.GetMissingSequenceNumbers(uint64(codec.ClockRate / 10))
+						if len(missing) == 0 {
+							break
+						}
 						nack := &rtcp.TransportLayerNack{
 							SenderSSRC: senderSSRC,
 							MediaSSRC:  uint32(ssrc),
 							Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
 						}
+						log.Debug().Msgf("sending nack: %v", nack)
 						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
 							log.Error().Err(err).Msg("failed to write NACK")
 						}
