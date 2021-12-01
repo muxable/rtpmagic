@@ -101,7 +101,7 @@ func main() {
 			// match with a codec.
 			codec, ok := ctx.Codecs.FindByPayloadType(pt)
 			if !ok {
-				log.Warn().Uint8("PayloadType", uint8(pt)).Msg("demuxer unknown payload type")
+				log.Warn().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer unknown payload type")
 				// we do need to consume all the packets though.
 				for {
 					p := &rtp.Packet{}
@@ -110,7 +110,7 @@ func main() {
 					}
 				}
 			} else {
-				log.Debug().Uint8("PayloadType", uint8(pt)).Msg("demuxer found payload type")
+				log.Debug().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer found new stream type")
 			}
 			codecTicker := codec.Ticker()
 			defer codecTicker.Stop()
