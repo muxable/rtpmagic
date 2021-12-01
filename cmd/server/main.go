@@ -15,7 +15,6 @@ import (
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/muxable/rtpmagic/pkg/server"
 	demuxer "github.com/muxable/rtpmagic/pkg/server/1_demuxer"
-	"github.com/muxable/rtptools/pkg/report"
 	"github.com/muxable/rtptools/pkg/rfc7005"
 	"github.com/muxable/rtptools/pkg/x_ssrc"
 	sdk "github.com/pion/ion-sdk-go"
@@ -111,13 +110,9 @@ func main() {
 					}
 				}
 			}
-			rrRTPReader, rrRTPWriter := rtpio.RTPPipe()
-			rtpIn = rtpio.TeeRTPReader(rtpIn, rrRTPWriter)
-			rr := report.NewReceiverStream(ctx.Clock.Now, uint32(ssrc), codec.ClockRate, rrRTPReader, rtcpIn)
-
 			codecTicker := codec.Ticker()
 			defer codecTicker.Stop()
-			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 2*time.Second, rtpIn)
+			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 1*time.Second, rtpIn)
 			// write nacks periodically back to the sender
 			nackTicker := time.NewTicker(150 * time.Millisecond)
 			defer nackTicker.Stop()
@@ -133,10 +128,7 @@ func main() {
 							MediaSSRC:  uint32(ssrc),
 							Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
 						}
-						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{
-							rr.GenerateReport(),
-							nack,
-						}); err != nil {
+						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
 							log.Error().Err(err).Msg("failed to write NACK")
 						}
 					case <-done:
