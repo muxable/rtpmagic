@@ -109,6 +109,8 @@ func main() {
 						return
 					}
 				}
+			} else {
+				log.Debug().Uint8("PayloadType", uint8(pt)).Msg("demuxer found payload type")
 			}
 			codecTicker := codec.Ticker()
 			defer codecTicker.Stop()
