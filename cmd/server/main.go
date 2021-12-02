@@ -133,7 +133,6 @@ func main() {
 							MediaSSRC:  uint32(ssrc),
 							Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
 						}
-						log.Debug().Msgf("sending nack: %v", nack)
 						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
 							log.Error().Err(err).Msg("failed to write NACK")
 						}
