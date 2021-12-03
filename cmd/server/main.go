@@ -168,7 +168,6 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 		if _, err := rtpIn.ReadRTP(p); err != nil {
 			return nil
 		}
-		log.Printf("%v", p.SequenceNumber)
 		if p.SequenceNumber != prevSeq + 1 {
 			log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
 		}
