@@ -63,7 +63,6 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 		rtcpWriter: rtcpWriter,
 	}
 
-
 	ccTicker := time.NewTicker(100 * time.Millisecond)
 	done := make(chan bool, 1)
 	ccSSRC := webrtc.SSRC(rand.Uint32())
@@ -113,6 +112,7 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 			if err != nil {
 				return
 			}
+			log.Printf("%v -> %v", sender, n)
 			ts := time.Now()
 			h := &rtcp.Header{}
 			if err := h.Unmarshal(buf[:n]); err != nil {
