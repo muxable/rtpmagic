@@ -132,7 +132,6 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 					continue
 				}
 				ssrc := webrtc.SSRC(p.SSRC)
-				log.Printf("%v (%v)", sender, ssrc)
 				m.Lock()
 				m.sources[ssrc] = sender
 
