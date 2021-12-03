@@ -157,9 +157,11 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 	if err != nil {
 		return err
 	}
-	if _, err := rtc.Publish(track); err != nil {
+	transceivers, err := rtc.Publish(track)
+	if err != nil {
 		return err
 	}
+	defer rtc.UnPublish(transceivers...)
 	prevSeq := uint16(0)
 	for {
 		p := &rtp.Packet{}
