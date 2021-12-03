@@ -112,7 +112,6 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 			if err != nil {
 				return
 			}
-			log.Printf("%v -> %v", sender, n)
 			ts := time.Now()
 			h := &rtcp.Header{}
 			if err := h.Unmarshal(buf[:n]); err != nil {
@@ -133,6 +132,7 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 					continue
 				}
 				ssrc := webrtc.SSRC(p.SSRC)
+				log.Printf("%v (%v)", sender, ssrc)
 				m.Lock()
 				m.sources[ssrc] = sender
 
