@@ -57,7 +57,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	from := flag.String("from", "0.0.0.0:5000", "The address to receive from")
-	to := flag.String("to", "34.72.248.242:50051", "The address to send to")
+	to := flag.String("to", "34.150.236.219:50051", "The address to send to")
 	flag.Parse()
 
 	ctx := pipeline.Context{
@@ -92,7 +92,7 @@ func main() {
 
 	rid := "mugit"
 
-	if err := rtc.Join(rid, rid, sdk.NewJoinConfig().SetNoSubscribe()); err != nil {
+	if err := rtc.Join(rid, sdk.RandomKey(4), sdk.NewJoinConfig().SetNoSubscribe()); err != nil {
 		panic(err)
 	}
 
@@ -144,9 +144,16 @@ func main() {
 
 			log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
 
-			identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
-			if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
-				log.Error().Err(err).Msg("sender terminated")
+			if codec.Transcode != nil {
+				identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
+				if err := NewRTPSender(rtc, identity, codec.OutputCodec, codec.Transcode(jbRTP)); err != nil {
+					log.Error().Err(err).Msg("sender terminated")
+				}
+			} else {
+				identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
+				if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
+					log.Error().Err(err).Msg("sender terminated")
+				}
 			}
 		})
 	})
