@@ -28,6 +28,8 @@ type BalancedUDPConn struct {
 	readRTPCh  chan *rtp.Packet
 	readRTCPCh chan []rtcp.Packet
 	cancel     context.CancelFunc
+
+	cleanup sync.Map
 }
 
 func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*BalancedUDPConn, error) {
@@ -38,57 +40,20 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 		readRTPCh:  make(chan *rtp.Packet, 128),
 		readRTCPCh: make(chan []rtcp.Packet, 128),
 		cancel:     cancel,
+		cleanup:    sync.Map{},
+	}
+	if err := n.bindLocalAddresses(addr); err != nil {
+		return nil, err
 	}
 	go func() {
 		ticker := time.NewTicker(pollingInterval)
 		defer ticker.Stop()
-		// this table is to prevent deadlocking for cleanups.
-		cleanup := sync.Map{}
 		for {
 			select {
 			case <-ticker.C:
-				// get the network interfaces.
-				devices, err := GetLocalAddresses()
-				if err != nil {
+				if err := n.bindLocalAddresses(addr); err != nil {
 					log.Warn().Msgf("failed to get local addresses: %v", err)
-					continue
 				}
-				n.Lock()
-				// add any interfaces that are not already active.
-				for device := range devices {
-					if _, ok := n.conns[device]; !ok {
-						conn, err := DialVia(addr, device)
-						if err != nil {
-							log.Warn().Msgf("failed to connect to %s: %v", addr, err)
-							continue
-						}
-						wrapped := rtpnet.NewCCWrapper(&UDPConnWithErrorHandler{
-							UDPConn: conn,
-							onError: func(err error) {
-								log.Warn().Err(err).Msgf("udp error on %s", device)
-								cleanup.Store(device, true)
-							},
-						}, 1500)
-						go readRTPLoop(wrapped, n.readRTPCh)
-						go readRTCPLoop(wrapped, n.readRTCPCh)
-						n.conns[device] = wrapped
-						log.Info().Msgf("connected to %s via %s", addr, device)
-					}
-				}
-				// remove any interfaces that are no longer active.
-				for device, conn := range n.conns {
-					_, cleanupRequested := cleanup.LoadAndDelete(device)
-					if _, ok := devices[device]; !ok || cleanupRequested {
-						// remove this interface.
-						if err := conn.Close(); err != nil {
-							log.Warn().Msgf("failed to close connection: %v", err)
-							continue
-						}
-						delete(n.conns, device)
-						log.Info().Msgf("disconnected from %s via %s", addr, device)
-					}
-				}
-				n.Unlock()
 			case <-ctx.Done():
 				return
 			}
@@ -124,6 +89,53 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 		}
 	}()
 	return n, nil
+}
+
+// bindLocalAddresses binds the local addresses to the UDPConn.
+func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
+	// get the network interfaces.
+	devices, err := GetLocalAddresses()
+	if err != nil {
+		return err
+	}
+	n.Lock()
+	defer n.Unlock()
+	// add any interfaces that are not already active.
+	for device := range devices {
+		if _, ok := n.conns[device]; !ok {
+			conn, err := DialVia(addr, device)
+			if err != nil {
+				log.Warn().Msgf("failed to connect to %s: %v", addr, err)
+				continue
+			}
+			wrapped := rtpnet.NewCCWrapper(&UDPConnWithErrorHandler{
+				UDPConn: conn,
+				onError: func(err error) {
+					n.Lock()
+					defer n.Unlock()
+					if conn, ok := n.conns[device]; ok {
+						go conn.Close()
+						delete(n.conns, device)
+					}
+					log.Warn().Err(err).Msgf("udp error on %s", device)
+				},
+			}, 1500)
+			go readRTPLoop(wrapped, n.readRTPCh)
+			go readRTCPLoop(wrapped, n.readRTCPCh)
+			n.conns[device] = wrapped
+			log.Info().Msgf("connected to %s via %s", addr, device)
+		}
+	}
+	// remove any interfaces that are no longer active.
+	for device, conn := range n.conns {
+		if _, ok := devices[device]; !ok {
+			// remove this interface.
+			go conn.Close() // this can block so ignore.
+			delete(n.conns, device)
+			log.Info().Msgf("disconnected from %s via %s", addr, device)
+		}
+	}
+	return nil
 }
 
 func readRTPLoop(conn *rtpnet.CCWrapper, readCh chan *rtp.Packet) {

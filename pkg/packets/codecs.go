@@ -20,7 +20,7 @@ import (
 type Codec struct {
 	webrtc.RTPCodecCapability
 	webrtc.PayloadType
-	rtp.Payloader
+	Payloader func() rtp.Payloader
 
 	Transcode   func(rtpio.RTPReader) rtpio.RTPReader
 	OutputCodec *Codec
@@ -51,23 +51,31 @@ var defaultCodecSet = NewCodecSet([]Codec{
 	{
 		PayloadType:        111,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2},
-		Payloader:          &codecs.OpusPayloader{},
+		Payloader: func() rtp.Payloader {
+			return &codecs.OpusPayloader{}
+		},
 	},
 	// video codecs
 	{
 		PayloadType:        96,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
-		Payloader:          &codecs.VP8Payloader{},
+		Payloader: func() rtp.Payloader {
+			return &codecs.VP8Payloader{EnablePictureID: true}
+		},
 	},
 	{
 		PayloadType:        98,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000},
-		Payloader:          &codecs.VP9Payloader{},
+		Payloader: func() rtp.Payloader {
+			return &codecs.VP9Payloader{}
+		},
 	},
 	{
 		PayloadType:        102,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
-		Payloader:          &codecs.H264Payloader{},
+		Payloader: func() rtp.Payloader {
+			return &codecs.H264Payloader{}
+		},
 	},
 	{
 		PayloadType:        106,
@@ -135,7 +143,9 @@ var defaultCodecSet = NewCodecSet([]Codec{
 		OutputCodec: &Codec{
 			PayloadType:        102,
 			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
-			Payloader:          &codecs.H264Payloader{},
+			Payloader:          func() rtp.Payloader {
+				return &codecs.H264Payloader{}
+			},
 		},
 	},
 })

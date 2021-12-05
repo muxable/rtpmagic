@@ -2,24 +2,22 @@ package balancer
 
 import (
 	"net"
+	"sync"
 )
 
 type UDPConnWithErrorHandler struct {
 	*net.UDPConn
 
 	onError func(error)
-
-	errored bool
+	errorOnce sync.Once
 }
 
 func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 	n, err := c.UDPConn.Write(b)
 	if err != nil {
-		if c.errored {
-			return n, err
-		}
-		defer c.onError(err)
-		c.errored = true
+		c.errorOnce.Do(func() {
+			go c.onError(err)
+		})
 	}
 	return n, err
 }
@@ -27,11 +25,9 @@ func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
 	n, err := c.UDPConn.Read(b)
 	if err != nil {
-		if c.errored {
-			return n, err
-		}
-		defer c.onError(err)
-		c.errored = true
+		c.errorOnce.Do(func() {
+			go c.onError(err)
+		})
 	}
 	return n, err
 }

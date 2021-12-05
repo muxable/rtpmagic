@@ -30,8 +30,6 @@ type CCWrapper struct {
 	ccBuffer *nack.SendBuffer
 	ccSeq    uint16
 
-	Enabled bool
-
 	done chan bool
 }
 
@@ -46,7 +44,7 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	// we can tolerate much higher packet losses.
 	config.ReferencePacketLossRatio = 0.1
 	config.ReferencePacketMarkingRatio = 0.1
-	config.MaximumRate = 6 * rfc8698.Mbps
+	config.MaximumRate = 10 * rfc8698.Mbps
 	w := &CCWrapper{
 		conn:       conn,
 		rtpReader:  rtpReader,
@@ -61,7 +59,7 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 
 	go func() {
 		// periodically poll the receiver and notify the sender.
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
 		if err := w.sendClockSynchronizationPacket(); err != nil {
@@ -171,7 +169,6 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 				rtpTime := uint32(x_time.GoTimeToNTP(time.Now()) >> 16)
 				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
 				rtt := x_time.NTPToGoDuration(rtpTime-uint32(report.LastSenderNTPTime)) - delay
-				w.Enabled = true
 				w.Sender.UpdateEstimatedRoundTripTime(rtt)
 			}
 		}
@@ -185,8 +182,8 @@ func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
 func (w *CCWrapper) GetEstimatedBitrate() uint32 {
-	if !w.Enabled {
-		return 100 // send some minimal data.
+	if w.Sender.SenderEstimatedRoundTripTime == 0 {
+		return 1000
 	}
 	return uint32(w.Sender.GetTargetRate(1000))
 }
