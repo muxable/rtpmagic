@@ -25,8 +25,8 @@ func init() {
 
 func NewSRTSink(rtpCh chan *rtp.Packet) error {
 	p := `
-		udpsrc port=7010 do-timestamp=true ! rtph265depay ! h265parse ! mux.
-		udpsrc port=7020 do-timestamp=true ! rtpopusdepay ! opusparse ! mux.
+		udpsrc port=7010 do-timestamp=true caps="application/x-rtp" ! rtph265depay ! h265parse ! mux.
+		udpsrc port=7020 do-timestamp=true caps="application/x-rtp" ! rtpopusdepay ! opusparse ! mux.
 
 		mpegtsmux name=mux ! srtsink mode=listener localaddress=0.0.0.0`
 	cp := C.CString(p)
