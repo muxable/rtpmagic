@@ -2,7 +2,7 @@ module github.com/muxable/rtpmagic
 
 go 1.17
 
-replace github.com/muxable/rtptools => ../interceptor
+replace github.com/muxable/rtptools => ../rtptools
 
 replace github.com/muxable/rtpio => ../rtpio
 
