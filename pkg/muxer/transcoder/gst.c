@@ -1,6 +1,7 @@
 #include "gst.h"
 
 #include <gst/app/gstappsrc.h>
+#include <stdio.h>
 
 static gboolean gstreamer_send_bus_call(GstBus *bus, GstMessage *msg, gpointer data)
 {
@@ -45,7 +46,7 @@ GstFlowReturn gstreamer_send_new_video_sample_handler(GstElement *object, gpoint
     if (buffer)
     {
       gst_buffer_extract_dup(buffer, 0, gst_buffer_get_size(buffer), &copy, &copy_size);
-      goHandleVideoPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), user_data);
+      goHandleVideoPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), GST_BUFFER_DTS(buffer), user_data);
     }
     gst_sample_unref(sample);
   }
@@ -89,7 +90,7 @@ GstFlowReturn gstreamer_send_new_audio_sample_handler(GstElement *object, gpoint
     if (buffer)
     {
       gst_buffer_extract_dup(buffer, 0, gst_buffer_get_size(buffer), &copy, &copy_size);
-      goHandleAudioPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), user_data);
+      goHandleAudioPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), GST_BUFFER_DTS(buffer), user_data);
     }
     gst_sample_unref(sample);
   }

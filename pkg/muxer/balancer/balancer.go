@@ -108,9 +108,9 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 				log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 				continue
 			}
-			wrapped := rtpnet.NewCCWrapper(&UDPConnWithErrorHandler{
-				UDPConn: conn,
-				onError: func(err error) {
+			wrapped := rtpnet.NewCCWrapper(NewUDPConnWithErrorHandler(
+				conn,
+				func(err error) {
 					n.Lock()
 					defer n.Unlock()
 					if conn, ok := n.conns[device]; ok {
@@ -118,8 +118,7 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 						delete(n.conns, device)
 					}
 					log.Warn().Err(err).Msgf("udp error on %s", device)
-				},
-			}, 1500)
+				}), 1500)
 			go readRTPLoop(wrapped, n.readRTPCh)
 			go readRTCPLoop(wrapped, n.readRTCPCh)
 			n.conns[device] = wrapped

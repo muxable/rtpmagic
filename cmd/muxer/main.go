@@ -24,7 +24,7 @@ func main() {
 	flag.Parse()
 
 	codecs := packets.DefaultCodecSet()
-	videoCodec, _ := codecs.FindByMimeType("video/h265")
+	videoCodec, _ := codecs.FindByMimeType(webrtc.MimeTypeH264)
 	audioCodec, _ := codecs.FindByMimeType(webrtc.MimeTypeOpus)
 
 	conn, err := muxer.Dial(*dest, *netsim)

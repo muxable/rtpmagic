@@ -17,7 +17,6 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/rs/zerolog/log"
 )
 
@@ -37,13 +36,13 @@ type Pipeline struct {
 func videoPipelineStr(videoSrc, mimeType string) string {
 	switch mimeType {
 	case webrtc.MimeTypeVP8:
-		return videoSrc + " ! queue ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 maxperf-enable=true preset-level=1 name=videoencode ! appsink name=videoappsink sync=false async=false"
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 maxperf-enable=true preset-level=1 name=videoencode ! appsink name=videoappsink"
 	case webrtc.MimeTypeVP9:
-		return videoSrc + " ! queue ! vp9enc ! appsink name=videoappsink sync=false async=false"
+		return videoSrc + " ! vp9enc ! appsink name=videoappsink"
 	case webrtc.MimeTypeH264:
-		return videoSrc + " ! queue ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink sync=false async=false"
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink"
 	case "video/h265":
-		return videoSrc + " ! queue ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h265enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink sync=false async=false"
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h265enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink"
 	default:
 		panic("unknown mime type")
 	}
@@ -52,7 +51,7 @@ func videoPipelineStr(videoSrc, mimeType string) string {
 func audioPipelineStr(audioSrc, mimeType string) string {
 	switch mimeType {
 	case webrtc.MimeTypeOpus:
-		return audioSrc + " ! queue ! opusenc ! appsink name=audioappsink sync=false async=false"
+		return audioSrc + " ! audioconvert ! opusenc ! appsink name=audioappsink"
 	default:
 		panic("unknown mime type")
 	}
@@ -92,8 +91,14 @@ func (p *Pipeline) writeRTCPLoop() {
 
 		// also update the bitrate in this loop because this is a convenient place to do it.
 		bitrate := p.conn.GetEstimatedBitrate()
-		log.Debug().Uint32("Bitrate", bitrate).Msg("estimated bitrate")
-		C.gstreamer_set_video_bitrate(p.Pipeline, C.guint(8*bitrate))
+		if bitrate > 64000 {
+			bitrate -= 64000 // subtract off audio bitrate
+		}
+		if bitrate < 300000 {
+			bitrate = 300000
+		}
+		log.Debug().Uint32("Bitrate", bitrate).Msg("encoder bitrate")
+		C.gstreamer_set_video_bitrate(p.Pipeline, C.guint(bitrate))
 	}
 }
 
@@ -163,10 +168,12 @@ func (p *Pipeline) Stop() {
 }
 
 //export goHandleAudioPipelineBuffer
-func goHandleAudioPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
+func goHandleAudioPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, dts C.ulong, data unsafe.Pointer) {
 	p := pointer.Restore(data).(*Pipeline)
 
-	for _, pkt := range p.audioHandler.packetize(media.Sample{Data: C.GoBytes(buffer, bufferLen), Duration: time.Duration(duration)}) {
+	samples := uint32(time.Duration(duration).Seconds() * float64(p.audioHandler.ClockRate))
+
+	for _, pkt := range p.audioHandler.packetize(C.GoBytes(buffer, bufferLen), samples) {
 		p.audioHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 		if _, err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
@@ -175,10 +182,12 @@ func goHandleAudioPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duratio
 }
 
 //export goHandleVideoPipelineBuffer
-func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
+func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, dts C.ulong, data unsafe.Pointer) {
 	p := pointer.Restore(data).(*Pipeline)
 
-	for _, pkt := range p.videoHandler.packetize(media.Sample{Data: C.GoBytes(buffer, bufferLen), Duration: time.Duration(duration)}) {
+	rtpts := uint32(uint64(dts) / 1000 * (uint64(p.videoHandler.ClockRate) / 1000) / 1000)
+
+	for _, pkt := range p.videoHandler.packetize(C.GoBytes(buffer, bufferLen), rtpts) {
 		p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 		if _, err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
@@ -187,7 +196,7 @@ func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duratio
 }
 
 //export goHandleVideoPipelineRtp
-func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C.int, data unsafe.Pointer) {
+func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, data unsafe.Pointer) {
 	p := pointer.Restore(data).(*Pipeline)
 
 	pkt := &rtp.Packet{}

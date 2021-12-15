@@ -2,8 +2,8 @@ package transcoder
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/muxable/rtpmagic/pkg/muxer/nack"
@@ -11,7 +11,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/rs/zerolog/log"
 )
 
 type SampleHandler struct {
@@ -20,7 +20,7 @@ type SampleHandler struct {
 	payloader  rtp.Payloader
 	sequencer  rtp.Sequencer
 	packetizer rtp.Packetizer
-	clockRate  uint32
+	ClockRate  uint32
 }
 
 var ssrcRand = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -35,21 +35,39 @@ func NewSampleHandler(codec *packets.Codec) *SampleHandler {
 	log.Printf("[rtp] ssrc: %d", ssrc)
 	payloader := codec.Payloader()
 	sequencer := rtp.NewRandomSequencer()
-	packetizer := rtp.NewPacketizer(1200,
-		uint8(codec.PayloadType),
-		ssrc,
-		payloader,
-		sequencer,
-		codec.ClockRate,
-	)
+	if strings.HasPrefix(codec.MimeType, "video/") {
+		packetizer := packets.NewTSPacketizer(1200,
+			uint8(codec.PayloadType),
+			ssrc,
+			payloader,
+			sequencer,
+		)
 
-	return &SampleHandler{
-		ssrc:       webrtc.SSRC(ssrc),
-		sendBuffer: nack.NewSendBuffer(14),
-		payloader:  payloader,
-		sequencer:  sequencer,
-		packetizer: packetizer,
-		clockRate:  codec.ClockRate,
+		return &SampleHandler{
+			ssrc:       webrtc.SSRC(ssrc),
+			sendBuffer: nack.NewSendBuffer(14),
+			payloader:  payloader,
+			sequencer:  sequencer,
+			packetizer: packetizer,
+			ClockRate:  codec.ClockRate,
+		}
+	} else {
+		packetizer := rtp.NewPacketizer(1200,
+			uint8(codec.PayloadType),
+			ssrc,
+			payloader,
+			sequencer,
+			0,
+		)
+
+		return &SampleHandler{
+			ssrc:       webrtc.SSRC(ssrc),
+			sendBuffer: nack.NewSendBuffer(14),
+			payloader:  payloader,
+			sequencer:  sequencer,
+			packetizer: packetizer,
+			ClockRate:  codec.ClockRate,
+		}
 	}
 }
 
@@ -62,7 +80,6 @@ func (h *SampleHandler) SourceDescription(cname string) *rtcp.SourceDescription 
 	}
 }
 
-func (h *SampleHandler) packetize(sample media.Sample) []*rtp.Packet {
-	samples := uint32(time.Duration(sample.Duration).Seconds() * float64(h.clockRate))
-	return h.packetizer.Packetize(sample.Data, samples)
+func (h *SampleHandler) packetize(data []byte, samples uint32) []*rtp.Packet {
+	return h.packetizer.Packetize(data, samples)
 }

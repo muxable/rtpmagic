@@ -44,7 +44,8 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	// we can tolerate much higher packet losses.
 	config.ReferencePacketLossRatio = 0.1
 	config.ReferencePacketMarkingRatio = 0.1
-	config.MaximumRate = 10 * rfc8698.Mbps
+	config.MinimumRate = 100 * rfc8698.Kbps
+	config.MaximumRate = 4 * rfc8698.Mbps
 	w := &CCWrapper{
 		conn:       conn,
 		rtpReader:  rtpReader,
