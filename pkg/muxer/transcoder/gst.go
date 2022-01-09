@@ -38,7 +38,7 @@ func videoPipelineStr(videoSrc, mimeType string) string {
 	case webrtc.MimeTypeVP8:
 		return videoSrc + " ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 maxperf-enable=true preset-level=1 name=videoencode ! appsink name=videoappsink"
 	case webrtc.MimeTypeVP9:
-		return videoSrc + " ! vp9enc ! appsink name=videoappsink"
+		return videoSrc + " ! vp9enc deadline=1 ! appsink name=videoappsink"
 	case webrtc.MimeTypeH264:
 		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink"
 	case "video/h265":

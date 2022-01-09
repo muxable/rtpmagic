@@ -1,7 +1,6 @@
 package packets
 
 import (
-	"log"
 	"math/rand"
 	"time"
 
@@ -44,10 +43,6 @@ func (p *packetizer) Packetize(payload []byte, pts uint32) []*rtp.Packet {
 	// Guard against an empty payload
 	if len(payload) == 0 {
 		return nil
-	}
-
-	if p.PayloadType == 111 {
-		log.Printf("pts %v", pts)
 	}
 
 	payloads := p.Payloader.Payload(p.MTU-12, payload)

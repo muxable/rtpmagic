@@ -1,20 +1,12 @@
 package packets
 
 import (
-	"context"
-	"io"
-	"log"
-	"net"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/muxable/rtpio"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v3"
-
-	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
 type Codec struct {
@@ -22,8 +14,6 @@ type Codec struct {
 	webrtc.PayloadType
 	Payloader func() rtp.Payloader
 
-	Transcode   func(rtpio.RTPReader) rtpio.RTPReader
-	OutputCodec *Codec
 }
 
 // Type gets the type of codec (video or audio) based on the mime type.
@@ -80,73 +70,6 @@ var defaultCodecSet = NewCodecSet([]Codec{
 	{
 		PayloadType:        106,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/h265", ClockRate: 90000},
-		Transcode: func(rtpIn rtpio.RTPReader) rtpio.RTPReader {
-			outReader, outWriter := io.Pipe()
-			go func() {
-				conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 5006})
-				if err != nil {
-					log.Println(err)
-					return
-				}
-				defer conn.Close()
-				for {
-					buf := make([]byte, 1024)
-					n, _, err := conn.ReadFromUDP(buf)
-					if err != nil {
-						log.Println(err)
-						return
-					}
-					outWriter.Write(buf[:n])
-				}
-			}()
-			go func() {
-				pipeline := ffmpeg.Input("h265transcode.sdp", ffmpeg.KwArgs{
-					"protocol_whitelist": "file,crypto,udp,rtp",
-				}).Output("rtp://127.0.0.1:5006?pkt_size=1200", ffmpeg.KwArgs{
-					"c:v": "libx264",
-					"tune": "zerolatency",
-					"preset": "ultrafast",
-					"pix_fmt": "yuv420p",
-					"format": "rtp",
-				})
-				pipeline.Context = context.WithValue(pipeline.Context, "Stderr", os.Stderr)
-				log.Printf("%v", pipeline.GetArgs())
-				if err := pipeline.Run(); err != nil {
-					log.Printf("%v", err)
-				}
-			}()
-			go func() {
-				conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 5004})
-				if err != nil {
-					log.Printf("%v", err)
-					return
-				}
-				for {
-					p := &rtp.Packet{}
-					if _, err := rtpIn.ReadRTP(p); err != nil {
-						return
-					}
-					if p.Header.PayloadType != 106 {
-						continue
-					}
-					buf, err := p.Marshal()
-					if err != nil {
-						continue
-					}
-					if _, err := conn.Write(buf); err != nil {
-						return
-					}
-				}
-			}()
-			return rtpio.NewRTPReader(outReader, 1500)
-		},
-		OutputCodec: &Codec{
-			PayloadType:        102,
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
-			Payloader:          func() rtp.Payloader {
-				return &codecs.H264Payloader{}
-			},
-		},
 	},
 })
 

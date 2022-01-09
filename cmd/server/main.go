@@ -18,6 +18,7 @@ import (
 	"github.com/muxable/rtpmagic/pkg/server/srt"
 	"github.com/muxable/rtptools/pkg/rfc7005"
 	"github.com/muxable/rtptools/pkg/x_ssrc"
+	transcoder "github.com/muxable/transcoder/pkg"
 	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -86,7 +87,7 @@ func main() {
 
 	if *useSRTSink {
 		rtpCh := make(chan *rtp.Packet)
-		
+
 		go srt.NewSRTSink(rtpCh)
 
 		x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
@@ -214,28 +215,66 @@ func main() {
 	}
 }
 
+func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
+	tl, err := webrtc.NewTrackLocalStaticRTP(tr.Codec().RTPCodecCapability, tr.ID(), tr.StreamID())
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		for {
+			p, _, err := tr.ReadRTP()
+			if err != nil {
+				return
+			}
+			if err := tl.WriteRTP(p); err != nil {
+				return
+			}
+		}
+	}()
+	return tl, nil
+
+}
+
 func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
+	client, err := transcoder.NewTranscoderClient("127.0.0.1:50051")
+	if err != nil {
+		return err
+	}
+
 	track, err := webrtc.NewTrackLocalStaticRTP(codec.RTPCodecCapability, tid, tid)
 	if err != nil {
 		return err
 	}
-	transceivers, err := rtc.Publish(track)
+
+	go func() {
+		prevSeq := uint16(0)
+		for {
+			p := &rtp.Packet{}
+			if _, err := rtpIn.ReadRTP(p); err != nil {
+				return
+			}
+			if p.SequenceNumber != prevSeq+1 {
+				log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
+			}
+			prevSeq = p.SequenceNumber
+			if err := track.WriteRTP(p); err != nil {
+				log.Warn().Err(err).Msg("failed to write sample")
+			}
+		}
+	}()
+
+	transcodedRemote, err := client.Transcode(track)
 	if err != nil {
 		return err
 	}
-	defer rtc.UnPublish(transceivers...)
-	prevSeq := uint16(0)
-	for {
-		p := &rtp.Packet{}
-		if _, err := rtpIn.ReadRTP(p); err != nil {
-			return nil
-		}
-		if p.SequenceNumber != prevSeq + 1 {
-			log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
-		}
-		prevSeq = p.SequenceNumber
-		if err := track.WriteRTP(p); err != nil {
-			log.Warn().Err(err).Msg("failed to write sample")
-		}
+
+	transcodedLocal, err := pipe(transcodedRemote)
+	if err != nil {
+		return err
 	}
+
+	if _, err := rtc.Publish(transcodedLocal); err != nil {
+		return err
+	}
+	return nil
 }

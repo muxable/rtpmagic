@@ -143,6 +143,8 @@ void gstreamer_send_stop_pipeline(GstElement *pipeline)
 void gstreamer_set_video_bitrate(GstElement *pipeline, unsigned int bitrate)
 {
   GstElement *encoder = gst_bin_get_by_name(GST_BIN(pipeline), "videoencode");
-  g_object_set(G_OBJECT(encoder), "bitrate", bitrate, NULL);
-  gst_object_unref(encoder);
+  if (encoder != NULL) {
+    g_object_set(G_OBJECT(encoder), "bitrate", bitrate, NULL);
+    gst_object_unref(encoder);
+  }
 }
