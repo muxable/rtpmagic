@@ -2,22 +2,19 @@ module github.com/muxable/rtpmagic
 
 go 1.17
 
-replace github.com/muxable/rtptools => ../rtptools
-
-replace github.com/muxable/rtpio => ../rtpio
-
 require (
 	github.com/benbjohnson/clock v1.3.0
 	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-pointer v0.0.1
 	github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408
-	github.com/muxable/rtptools v0.1.0
-	github.com/muxable/transcoder v0.1.0
+	github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b
+	github.com/muxable/transcoder v0.1.2-0.20220111175857-01dcbd62ddbb
 	github.com/pion/ion-sdk-go v0.7.0
 	github.com/pion/rtcp v1.2.9
 	github.com/pion/rtp v1.7.4
 	github.com/pion/webrtc/v3 v3.1.13
 	github.com/rs/zerolog v1.26.0
+	go.uber.org/zap v1.19.1
 	golang.org/x/net v0.0.0-20211215060638-4ddde0e984e9
 )
 
@@ -31,7 +28,6 @@ require (
 	github.com/prometheus/procfs v0.7.3 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.19.1 // indirect
 )
 
 require (
@@ -66,6 +62,6 @@ require (
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20211129164237-f09f9a12af12 // indirect
-	google.golang.org/grpc v1.43.0 // indirect
+	google.golang.org/grpc v1.43.0
 	google.golang.org/protobuf v1.27.1 // indirect
 )

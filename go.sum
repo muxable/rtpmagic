@@ -479,8 +479,15 @@ github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJ
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v0.0.0-20180701023420-4b7aa43c6742/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
 github.com/modern-go/reflect2 v1.0.1/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
+github.com/muxable/rtpio v0.0.0-20211123035715-280a3baedba8/go.mod h1:Oy6PkUAisiw17k1hpfolShj65b/wZvXGxzHErmj5VaU=
+github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408 h1:fPhIjE6L8jk8ZL/GPb+SC61ARYJIJ9u0odCJDUnai+U=
+github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408/go.mod h1:Oy6PkUAisiw17k1hpfolShj65b/wZvXGxzHErmj5VaU=
+github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b h1:hBdTyenIM0u4SQyediLC/QhRsjY6Ws5cS9yQMqcjj3o=
+github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b/go.mod h1:gB3wvmwUDaDg6evnN0P2poJJfS8vNW2GEfBIjcqFX30=
 github.com/muxable/transcoder v0.1.0 h1:DECFgW+8EARMvXrDC+oxrorB/fSCo3jKW0aO+3TYMtY=
 github.com/muxable/transcoder v0.1.0/go.mod h1:M3XH1KNncRGvXFtE6qO78oIarEEUIWzKlBFRuM73anw=
+github.com/muxable/transcoder v0.1.2-0.20220111175857-01dcbd62ddbb h1:eifdv47nibh2+Ptgt20T/aM1MKcBaBrEl7i03UTSd4Q=
+github.com/muxable/transcoder v0.1.2-0.20220111175857-01dcbd62ddbb/go.mod h1:LI+Mns0nyhHpbG+4QJ84jLqRowdl35dmud63LdsBD70=
 github.com/mwitkow/go-conntrack v0.0.0-20161129095857-cc309e4a2223/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/grpc-proxy v0.0.0-20181017164139-0f1106ef9c76/go.mod h1:x5OoJHDHqxHS801UIuhqGl6QdSAEJvtausosHSdazIo=
