@@ -189,7 +189,7 @@ func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
 }
 
 func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
-	conn, err := grpc.Dial("35.212.71.185:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial("transcode.mtun.io:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
 	}
