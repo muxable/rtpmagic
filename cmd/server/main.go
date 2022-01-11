@@ -15,7 +15,6 @@ import (
 	"github.com/muxable/rtpmagic/pkg/pipeline"
 	"github.com/muxable/rtpmagic/pkg/server"
 	demuxer "github.com/muxable/rtpmagic/pkg/server/1_demuxer"
-	"github.com/muxable/rtpmagic/pkg/server/srt"
 	"github.com/muxable/rtptools/pkg/rfc7005"
 	"github.com/muxable/rtptools/pkg/x_ssrc"
 	transcoder "github.com/muxable/transcoder/pkg"
@@ -26,6 +25,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // The overall pipeline follows the following architecture:
@@ -39,6 +41,14 @@ import (
 // - pt muxer (implicit)
 // - sender
 func main() {
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+	undo := zap.ReplaceGlobals(logger)
+	defer undo()
+
 	go func() {
 		m := http.NewServeMux()
 		m.Handle("/metrics", promhttp.Handler())
@@ -59,8 +69,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	from := flag.String("from", "0.0.0.0:5000", "The address to receive from")
-	to := flag.String("to", "34.150.236.219:50051", "The address to send to")
-	useSRTSink := flag.Bool("srt", false, "Use an srt sink")
+	to := flag.String("to", "34.145.147.32:50051", "The address to send to")
 	flag.Parse()
 
 	ctx := pipeline.Context{
@@ -85,134 +94,78 @@ func main() {
 
 	senderSSRC := rand.Uint32()
 
-	if *useSRTSink {
-		rtpCh := make(chan *rtp.Packet)
+	connector := sdk.NewConnector(*to)
+	rtc := sdk.NewRTC(connector, sdk.DefaultConfig)
 
-		go srt.NewSRTSink(rtpCh)
+	rid := "mugit"
 
-		x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
-			demuxer.NewPayloadTypeDemuxer(ctx.Clock.Now, rtpIn, func(pt webrtc.PayloadType, rtpIn rtpio.RTPReader) {
-				// match with a codec.
-				codec, ok := ctx.Codecs.FindByPayloadType(pt)
-				if !ok {
-					log.Warn().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer unknown payload type")
-					// we do need to consume all the packets though.
-					for {
-						p := &rtp.Packet{}
-						if _, err := rtpIn.ReadRTP(p); err != nil {
-							return
-						}
-					}
-				} else {
-					log.Debug().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer found new stream type")
+	if err := rtc.Join(rid, sdk.RandomKey(4), sdk.NewJoinConfig().SetNoSubscribe()); err != nil {
+		panic(err)
+	}
+
+	x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
+		go func() {
+			cp := make([]rtcp.Packet, 20)
+			for {
+				_, err := rtcpIn.ReadRTCP(cp)
+				if err != nil {
+					return
 				}
-				codecTicker := codec.Ticker()
-				defer codecTicker.Stop()
-				jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 1*time.Second, rtpIn)
-				// write nacks periodically back to the sender
-				nackTicker := time.NewTicker(150 * time.Millisecond)
-				defer nackTicker.Stop()
-				done := make(chan bool, 1)
-				defer func() { done <- true }()
-				go func() {
-					for {
-						select {
-						case <-nackTicker.C:
-							missing := jb.GetMissingSequenceNumbers(uint64(codec.ClockRate / 10))
-							if len(missing) == 0 {
-								break
-							}
-							nack := &rtcp.TransportLayerNack{
-								SenderSSRC: senderSSRC,
-								MediaSSRC:  uint32(ssrc),
-								Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
-							}
-							if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
-								log.Error().Err(err).Msg("failed to write NACK")
-							}
-						case <-done:
-							return
-						}
-					}
-				}()
-
-				log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
-
+			}
+		}()
+		demuxer.NewPayloadTypeDemuxer(ctx.Clock.Now, rtpIn, func(pt webrtc.PayloadType, rtpIn rtpio.RTPReader) {
+			// match with a codec.
+			codec, ok := ctx.Codecs.FindByPayloadType(pt)
+			if !ok {
+				log.Warn().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer unknown payload type")
+				// we do need to consume all the packets though.
 				for {
 					p := &rtp.Packet{}
-					if _, err := jbRTP.ReadRTP(p); err != nil {
-						log.Error().Err(err).Msg("failed to read RTP")
-						break
+					if _, err := rtpIn.ReadRTP(p); err != nil {
+						return
 					}
-					rtpCh <- p
 				}
-			})
-		})
-	} else {
-		connector := sdk.NewConnector(*to)
-		rtc := sdk.NewRTC(connector, sdk.DefaultConfig)
-
-		rid := "mugit"
-
-		if err := rtc.Join(rid, sdk.RandomKey(4), sdk.NewJoinConfig().SetNoSubscribe()); err != nil {
-			panic(err)
-		}
-
-		x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
-			demuxer.NewPayloadTypeDemuxer(ctx.Clock.Now, rtpIn, func(pt webrtc.PayloadType, rtpIn rtpio.RTPReader) {
-				// match with a codec.
-				codec, ok := ctx.Codecs.FindByPayloadType(pt)
-				if !ok {
-					log.Warn().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer unknown payload type")
-					// we do need to consume all the packets though.
-					for {
-						p := &rtp.Packet{}
-						if _, err := rtpIn.ReadRTP(p); err != nil {
-							return
+			} else {
+				log.Debug().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer found new stream type")
+			}
+			codecTicker := codec.Ticker()
+			defer codecTicker.Stop()
+			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 1*time.Second, rtpIn)
+			// write nacks periodically back to the sender
+			nackTicker := time.NewTicker(150 * time.Millisecond)
+			defer nackTicker.Stop()
+			done := make(chan bool, 1)
+			defer func() { done <- true }()
+			go func() {
+				for {
+					select {
+					case <-nackTicker.C:
+						missing := jb.GetMissingSequenceNumbers(uint64(codec.ClockRate / 10))
+						if len(missing) == 0 {
+							break
 						}
-					}
-				} else {
-					log.Debug().Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("demuxer found new stream type")
-				}
-				codecTicker := codec.Ticker()
-				defer codecTicker.Stop()
-				jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 1*time.Second, rtpIn)
-				// write nacks periodically back to the sender
-				nackTicker := time.NewTicker(150 * time.Millisecond)
-				defer nackTicker.Stop()
-				done := make(chan bool, 1)
-				defer func() { done <- true }()
-				go func() {
-					for {
-						select {
-						case <-nackTicker.C:
-							missing := jb.GetMissingSequenceNumbers(uint64(codec.ClockRate / 10))
-							if len(missing) == 0 {
-								break
-							}
-							nack := &rtcp.TransportLayerNack{
-								SenderSSRC: senderSSRC,
-								MediaSSRC:  uint32(ssrc),
-								Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
-							}
-							if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
-								log.Error().Err(err).Msg("failed to write NACK")
-							}
-						case <-done:
-							return
+						nack := &rtcp.TransportLayerNack{
+							SenderSSRC: senderSSRC,
+							MediaSSRC:  uint32(ssrc),
+							Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
 						}
+						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
+							log.Error().Err(err).Msg("failed to write NACK")
+						}
+					case <-done:
+						return
 					}
-				}()
-
-				log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
-
-				identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
-				if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
-					log.Error().Err(err).Msg("sender terminated")
 				}
-			})
+			}()
+
+			log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
+
+			identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
+			if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
+				log.Error().Err(err).Msg("sender terminated")
+			}
 		})
-	}
+	})
 }
 
 func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
@@ -236,7 +189,12 @@ func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
 }
 
 func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
-	client, err := transcoder.NewTranscoderClient("127.0.0.1:50051")
+	conn, err := grpc.Dial("35.212.71.185:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return err
+	}
+
+	client, err := transcoder.NewTranscoderAPIClient(conn)
 	if err != nil {
 		return err
 	}

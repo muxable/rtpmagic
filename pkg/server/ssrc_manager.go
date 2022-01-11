@@ -56,10 +56,10 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 	rtcpReader, rtcpWriter := rtpio.RTCPPipe()
 
 	m := &SSRCManager{
-		ctx:     ctx,
-		conn:    conn,
-		sources: make(map[webrtc.SSRC]*net.UDPAddr),
-		ccfb:    make(map[string]*ccfb),
+		ctx:        ctx,
+		conn:       conn,
+		sources:    make(map[webrtc.SSRC]*net.UDPAddr),
+		ccfb:       make(map[string]*ccfb),
 		rtcpWriter: rtcpWriter,
 	}
 
@@ -139,6 +139,7 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 				ecn, err := rfc8698.CheckExplicitCongestionNotification(oob[:oobn])
 				if err != nil {
 					log.Error().Err(err).Msg("failed to check ecn")
+					m.Unlock()
 					continue
 				}
 
@@ -147,6 +148,7 @@ func NewSSRCManager(ctx pipeline.Context, conn *net.UDPConn, mtu int) (rtpio.RTP
 				if ext := p.Header.GetExtension(5); ext != nil {
 					if err := tccExt.Unmarshal(ext); err != nil {
 						log.Error().Err(err).Msg("failed to unmarshal twcc extension")
+						m.Unlock()
 						continue
 					}
 				}
