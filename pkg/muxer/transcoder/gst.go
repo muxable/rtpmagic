@@ -82,12 +82,12 @@ func (p *Pipeline) writeRTCPLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
-		// videoSdes := p.videoHandler.SourceDescription(p.cname)
-		// audioSdes := p.audioHandler.SourceDescription(p.cname)
-		// if _, err := p.conn.WriteRTCP([]rtcp.Packet{videoSdes, audioSdes}); err != nil {
-		// 	log.Error().Err(err).Msg("failed to write rtcp")
-		// 	return
-		// }
+		videoSdes := p.videoHandler.SourceDescription(p.cname)
+		audioSdes := p.audioHandler.SourceDescription(p.cname)
+		if _, err := p.conn.WriteRTCP([]rtcp.Packet{videoSdes, audioSdes}); err != nil {
+			log.Error().Err(err).Msg("failed to write rtcp")
+			return
+		}
 
 		// also update the bitrate in this loop because this is a convenient place to do it.
 		bitrate := p.conn.GetEstimatedBitrate()
@@ -97,7 +97,6 @@ func (p *Pipeline) writeRTCPLoop() {
 		if bitrate < 300000 {
 			bitrate = 300000
 		}
-		log.Debug().Uint32("Bitrate", bitrate).Msg("encoder bitrate")
 		C.gstreamer_set_video_bitrate(p.Pipeline, C.guint(bitrate))
 	}
 }
