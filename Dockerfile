@@ -15,4 +15,6 @@ RUN go build -v -o /server cmd/server/main.go
 
 EXPOSE 5000/udp
 
+ENV GST_DEBUG=3
+
 CMD [ "/server" ]
