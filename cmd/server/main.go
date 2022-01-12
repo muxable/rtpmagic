@@ -204,11 +204,14 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 		return err
 	}
 
+	done := make(chan bool)
+
 	go func() {
 		prevSeq := uint16(0)
 		for {
 			p := &rtp.Packet{}
 			if _, err := rtpIn.ReadRTP(p); err != nil {
+				done <- true
 				return
 			}
 			if p.SequenceNumber != prevSeq+1 {
@@ -234,5 +237,7 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 	if _, err := rtc.Publish(transcodedLocal); err != nil {
 		return err
 	}
+
+	<-done
 	return nil
 }
