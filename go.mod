@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-pointer v0.0.1
 	github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408
 	github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b
-	github.com/muxable/transcoder v0.1.2-0.20220111175857-01dcbd62ddbb
+	github.com/muxable/transcoder v0.1.2
 	github.com/pion/ion-sdk-go v0.7.0
 	github.com/pion/rtcp v1.2.9
 	github.com/pion/rtp v1.7.4
