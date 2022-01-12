@@ -485,8 +485,8 @@ github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408 h1:fPhIjE6L8jk8ZL/GP
 github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408/go.mod h1:Oy6PkUAisiw17k1hpfolShj65b/wZvXGxzHErmj5VaU=
 github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b h1:hBdTyenIM0u4SQyediLC/QhRsjY6Ws5cS9yQMqcjj3o=
 github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b/go.mod h1:gB3wvmwUDaDg6evnN0P2poJJfS8vNW2GEfBIjcqFX30=
-github.com/muxable/transcoder v0.1.2 h1:TUamr94ZiEYQdP3zz2UYaCoFLVkpfF32MkPi2oXg0+w=
-github.com/muxable/transcoder v0.1.2/go.mod h1:7T8hZZORIdlo/cobItWJL9VJYT4b9c5cS3jTLmEEmcY=
+github.com/muxable/transcoder v0.1.3 h1:XRsZkb81gbjRKXNS2e1EgWwixqZR3FItWRWndMdROxs=
+github.com/muxable/transcoder v0.1.3/go.mod h1:7T8hZZORIdlo/cobItWJL9VJYT4b9c5cS3jTLmEEmcY=
 github.com/mwitkow/go-conntrack v0.0.0-20161129095857-cc309e4a2223/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/grpc-proxy v0.0.0-20181017164139-0f1106ef9c76/go.mod h1:x5OoJHDHqxHS801UIuhqGl6QdSAEJvtausosHSdazIo=
