@@ -193,7 +193,7 @@ func main() {
 				prevSeq := uint16(0)
 				for {
 					p := &rtp.Packet{}
-					if _, err := rtpIn.ReadRTP(p); err != nil {
+					if _, err := jbRTP.ReadRTP(p); err != nil {
 						done <- true
 						return
 					}
