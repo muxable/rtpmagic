@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -17,7 +18,7 @@ import (
 	demuxer "github.com/muxable/rtpmagic/pkg/server/1_demuxer"
 	"github.com/muxable/rtptools/pkg/rfc7005"
 	"github.com/muxable/rtptools/pkg/x_ssrc"
-	transcoder "github.com/muxable/transcoder/pkg"
+	"github.com/muxable/transcoder/pkg/transcoder"
 	sdk "github.com/pion/ion-sdk-go"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -204,7 +205,7 @@ func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RT
 		return err
 	}
 
-	client, err := transcoder.NewTranscoderAPIClient(conn)
+	client, err := transcoder.NewClient(context.Background(), conn)
 	if err != nil {
 		return err
 	}
