@@ -104,6 +104,17 @@ func main() {
 		panic(err)
 	}
 
+	tcConn, err := grpc.Dial("transcode.mtun.io:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		panic(err)
+	}
+
+	tc, err := transcoder.NewClient(context.Background(), tcConn)
+	if err != nil {
+		panic(err)
+	}
+
+
 	x_ssrc.NewDemultiplexer(ctx.Clock.Now, rtpReader, rtcpReader, func(ssrc webrtc.SSRC, rtpIn rtpio.RTPReader, rtcpIn rtpio.RTCPReader) {
 		go func() {
 			cp := make([]rtcp.Packet, 20)
@@ -171,10 +182,49 @@ func main() {
 
 			log.Info().Str("CNAME", "").Uint32("SSRC", uint32(ssrc)).Uint8("PayloadType", uint8(pt)).Msg("new inbound stream")
 
-			identity := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
-			if err := NewRTPSender(rtc, identity, codec, jbRTP); err != nil {
-				log.Error().Err(err).Msg("sender terminated")
+			tid := fmt.Sprintf("%s-%d-%d", "mugit", ssrc, pt)
+			track, err := webrtc.NewTrackLocalStaticRTP(codec.RTPCodecCapability, tid, tid)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to create track")
+				return
 			}
+
+			go func() {
+				prevSeq := uint16(0)
+				for {
+					p := &rtp.Packet{}
+					if _, err := rtpIn.ReadRTP(p); err != nil {
+						done <- true
+						return
+					}
+					if p.SequenceNumber != prevSeq+1 {
+						log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
+					}
+					prevSeq = p.SequenceNumber
+					if err := track.WriteRTP(p); err != nil {
+						log.Warn().Err(err).Msg("failed to write sample")
+					}
+				}
+			}()
+
+			transcodedRemote, err := tc.Transcode(track)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to transcode")
+				return
+			}
+
+			transcodedLocal, err := pipe(transcodedRemote)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to pipe")
+				return
+			}
+
+			if _, err := rtc.Publish(transcodedLocal); err != nil {
+				log.Error().Err(err).Msg("failed to publish")
+				return
+			}
+
+			<-done
 		})
 	})
 }
@@ -197,58 +247,4 @@ func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
 	}()
 	return tl, nil
 
-}
-
-func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
-	conn, err := grpc.Dial("transcode.mtun.io:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return err
-	}
-
-	client, err := transcoder.NewClient(context.Background(), conn)
-	if err != nil {
-		return err
-	}
-
-	track, err := webrtc.NewTrackLocalStaticRTP(codec.RTPCodecCapability, tid, tid)
-	if err != nil {
-		return err
-	}
-
-	done := make(chan bool)
-
-	go func() {
-		prevSeq := uint16(0)
-		for {
-			p := &rtp.Packet{}
-			if _, err := rtpIn.ReadRTP(p); err != nil {
-				done <- true
-				return
-			}
-			if p.SequenceNumber != prevSeq+1 {
-				log.Warn().Uint16("PrevSeq", prevSeq).Uint16("CurrSeq", p.SequenceNumber).Msg("missing packet")
-			}
-			prevSeq = p.SequenceNumber
-			if err := track.WriteRTP(p); err != nil {
-				log.Warn().Err(err).Msg("failed to write sample")
-			}
-		}
-	}()
-
-	transcodedRemote, err := client.Transcode(track)
-	if err != nil {
-		return err
-	}
-
-	transcodedLocal, err := pipe(transcodedRemote)
-	if err != nil {
-		return err
-	}
-
-	if _, err := rtc.Publish(transcodedLocal); err != nil {
-		return err
-	}
-
-	<-done
-	return nil
 }
