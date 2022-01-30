@@ -11,7 +11,6 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"github.com/rs/zerolog/log"
 )
 
 type SampleHandler struct {
@@ -26,13 +25,12 @@ type SampleHandler struct {
 var ssrcRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func NewSampleHandler(codec *packets.Codec) *SampleHandler {
-	if codec.MimeType == "video/h265" {
+	if codec.MimeType == "video/H265" {
 		return &SampleHandler{
 			sendBuffer: nack.NewSendBuffer(14),
 		}
 	}
 	ssrc := ssrcRand.Uint32()
-	log.Printf("[rtp] ssrc: %d", ssrc)
 	payloader := codec.Payloader()
 	sequencer := rtp.NewRandomSequencer()
 	if strings.HasPrefix(codec.MimeType, "video/") {

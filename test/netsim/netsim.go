@@ -187,12 +187,15 @@ func (n *NetSimUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 	return len(pkts), nil
 }
 
-func (n *NetSimUDPConn) GetEstimatedBitrate() uint32 {
-	total := uint32(0)
+func (n *NetSimUDPConn) GetEstimatedBitrate() (uint32, float64) {
+	totalBitrate := uint32(0)
+	totalPacketLossRate := float64(0)
 	for _, conn := range n.activeConnections {
-		total += conn.GetEstimatedBitrate()
+		bitrate, loss := conn.GetEstimatedBitrate()
+		totalBitrate += bitrate
+		totalPacketLossRate += loss * float64(bitrate)
 	}
-	return total
+	return totalBitrate, totalPacketLossRate / float64(totalBitrate)
 }
 
 // Close closes all active connections.

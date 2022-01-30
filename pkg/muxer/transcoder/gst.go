@@ -36,13 +36,13 @@ type Pipeline struct {
 func videoPipelineStr(videoSrc, mimeType string) string {
 	switch mimeType {
 	case webrtc.MimeTypeVP8:
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 maxperf-enable=true preset-level=1 name=videoencode ! appsink name=videoappsink"
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 preset-level=1 name=videoencode ! appsink name=videoappsink"
 	case webrtc.MimeTypeVP9:
 		return videoSrc + " ! vp9enc deadline=1 ! appsink name=videoappsink"
 	case webrtc.MimeTypeH264:
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink"
-	case "video/h265":
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h265enc bitrate=1000000 qp-range=\"28,50:0,38:0,50\" iframeinterval=60 preset-level=1 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink"
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink"
+	case "video/H265":
+		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h265enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink"
 	default:
 		panic("unknown mime type")
 	}
@@ -51,7 +51,7 @@ func videoPipelineStr(videoSrc, mimeType string) string {
 func audioPipelineStr(audioSrc, mimeType string) string {
 	switch mimeType {
 	case webrtc.MimeTypeOpus:
-		return audioSrc + " ! audioconvert ! opusenc ! appsink name=audioappsink"
+		return audioSrc + " ! audioconvert ! opusenc inband-fec=true name=audioencode ! appsink name=audioappsink"
 	default:
 		panic("unknown mime type")
 	}
@@ -82,23 +82,23 @@ func (p *Pipeline) writeRTCPLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
-		// videoSdes := p.videoHandler.SourceDescription(p.cname)
-		// audioSdes := p.audioHandler.SourceDescription(p.cname)
-		// if _, err := p.conn.WriteRTCP([]rtcp.Packet{videoSdes, audioSdes}); err != nil {
-		// 	log.Error().Err(err).Msg("failed to write rtcp")
-		// 	return
-		// }
+		videoSdes := p.videoHandler.SourceDescription(p.cname)
+		audioSdes := p.audioHandler.SourceDescription(p.cname)
+		if _, err := p.conn.WriteRTCP([]rtcp.Packet{videoSdes, audioSdes}); err != nil {
+			log.Error().Err(err).Msg("failed to write rtcp")
+			return
+		}
 
 		// also update the bitrate in this loop because this is a convenient place to do it.
-		bitrate := p.conn.GetEstimatedBitrate()
+		bitrate, loss := p.conn.GetEstimatedBitrate()
 		if bitrate > 64000 {
 			bitrate -= 64000 // subtract off audio bitrate
 		}
-		if bitrate < 300000 {
-			bitrate = 300000
+		if bitrate < 100000 {
+			bitrate = 100000
 		}
-		log.Debug().Uint32("Bitrate", bitrate).Msg("encoder bitrate")
 		C.gstreamer_set_video_bitrate(p.Pipeline, C.guint(bitrate))
+		C.gstreamer_set_packet_loss_percentage(p.Pipeline, C.guint(loss * 100))
 	}
 }
 
@@ -136,6 +136,7 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 			switch webrtc.SSRC(pkt.MediaSSRC) {
 			case p.videoHandler.ssrc:
 				if _, q := p.videoHandler.sendBuffer.Get(id); q != nil {
+					log.Warn().Uint16("Seq", id).Msg("responding to video nack")
 					if _, err := p.conn.WriteRTP(q); err != nil {
 						log.Error().Err(err).Msg("failed to write rtp")
 					}
@@ -150,6 +151,8 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 				} else {
 					log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
 				}
+			default:
+				log.Error().Uint32("SSRC", pkt.MediaSSRC).Msg("nack referring to unknown ssrc")
 			}
 		}
 	}
@@ -205,6 +208,7 @@ func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C
 		return
 	}
 
+	p.videoHandler.ssrc = webrtc.SSRC(pkt.SSRC)
 	p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 	if _, err := p.conn.WriteRTP(pkt); err != nil {
 		log.Error().Err(err).Msg("failed to write rtp")

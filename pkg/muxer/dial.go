@@ -13,7 +13,7 @@ type MuxerUDPConn interface {
 	rtpio.RTPReadWriteCloser
 	rtpio.RTCPReadWriteCloser
 
-	GetEstimatedBitrate() uint32
+	GetEstimatedBitrate() (uint32, float64)
 }
 
 func Dial(destination string, useNetsim bool) (MuxerUDPConn, error) {

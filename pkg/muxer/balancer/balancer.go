@@ -59,35 +59,6 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 			}
 		}
 	}()
-	go func() {
-		ticker := time.NewTicker(pollingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				n.RLock()
-				// print some debugging information
-				log.Debug().Int("Connections", len(n.conns)).Msg("active connections")
-				keys := make([]string, 0, len(n.conns))
-				for key := range n.conns {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-				for _, key := range keys {
-					conn := n.conns[key]
-					log.Debug().Str("Interface", key).
-						Uint32("TargetBitrate", conn.GetEstimatedBitrate()).
-						Str("RTT", conn.Sender.SenderEstimatedRoundTripTime.String()).
-						Float64("LossRatio", conn.Receiver.EstimatedPacketLossRatio).
-						Float64("ECNRatio", conn.Receiver.EstimatedPacketECNMarkingRatio).
-						Msg("active connection")
-				}
-				n.RUnlock()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 	return n, nil
 }
 
@@ -99,7 +70,7 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 		return err
 	}
 	n.Lock()
-	defer n.Unlock()
+	log.Printf("waiting for local addr lock")
 	// add any interfaces that are not already active.
 	for device := range devices {
 		if _, ok := n.conns[device]; !ok {
@@ -112,6 +83,8 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 				conn,
 				func(err error) {
 					n.Lock()
+					log.Printf("waiting for error lock")
+					defer log.Printf("unlocking error lock")
 					defer n.Unlock()
 					if conn, ok := n.conns[device]; ok {
 						go conn.Close()
@@ -133,6 +106,30 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 			delete(n.conns, device)
 			log.Info().Msgf("disconnected from %s via %s", addr, device)
 		}
+	}
+	log.Printf("unlocking local addr")
+	n.Unlock()
+	// print some debugging information
+	bitrate, loss := n.GetEstimatedBitrate()
+	log.Debug().
+		Int("Connections", len(n.conns)).
+		Uint32("TotalBitrate", bitrate).
+		Float64("TotalLoss", loss).
+		Msg("active connections")
+	keys := make([]string, 0, len(n.conns))
+	for key := range n.conns {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		conn := n.conns[key]
+		bitrate, loss := conn.GetEstimatedBitrate()
+		log.Debug().Str("Interface", key).
+			Uint32("TargetBitrate", bitrate).
+			Str("RTT", conn.Sender.SenderEstimatedRoundTripTime.String()).
+			Float64("LossRatio", loss).
+			Float64("ECNRatio", conn.Receiver.EstimatedPacketECNMarkingRatio).
+			Msg("active connection")
 	}
 	return nil
 }
@@ -182,7 +179,7 @@ func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
 	bitrates := make(map[string]uint32)
 	total := uint32(0)
 	for key, conn := range n.conns {
-		bitrates[key] = conn.GetEstimatedBitrate()
+		bitrates[key], _ = conn.GetEstimatedBitrate()
 		total += bitrates[key]
 	}
 	if total == 0 {
@@ -224,15 +221,18 @@ func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 }
 
 // GetEstimatedBitrate gets the estimated bitrate of the sender.
-func (n *BalancedUDPConn) GetEstimatedBitrate() uint32 {
+func (n *BalancedUDPConn) GetEstimatedBitrate() (uint32, float64) {
 	n.RLock()
 	defer n.RUnlock()
 
-	total := uint32(0)
+	totalBitrate := uint32(0)
+	totalPacketLossRate := float64(0)
 	for _, conn := range n.conns {
-		total += conn.GetEstimatedBitrate()
+		bitrate, loss := conn.GetEstimatedBitrate()
+		totalBitrate += bitrate
+		totalPacketLossRate += loss * float64(bitrate)
 	}
-	return total
+	return totalBitrate, totalPacketLossRate / float64(totalBitrate)
 }
 
 // Close closes all active connections.

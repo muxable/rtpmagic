@@ -20,7 +20,7 @@ func GetLocalAddresses() (map[string]bool, error) {
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(i.Name, "usb") || strings.HasPrefix(i.Name, "eth") || strings.HasPrefix(i.Name, "wlan") {
+		if strings.HasPrefix(i.Name, "usb") || strings.HasPrefix(i.Name, "eth") {
 			hasIPv4 := false
 			for _, a := range addrs {
 				switch v := a.(type) {

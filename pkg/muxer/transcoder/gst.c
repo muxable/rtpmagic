@@ -148,3 +148,10 @@ void gstreamer_set_video_bitrate(GstElement *pipeline, unsigned int bitrate)
     gst_object_unref(encoder);
   }
 }
+
+void gstreamer_set_packet_loss_percentage(GstElement *pipeline, unsigned int plp)
+{
+  GstElement *encoder = gst_bin_get_by_name(GST_BIN(pipeline), "audioencode");
+  g_object_set(G_OBJECT(encoder), "packet-loss-percentage", plp, NULL);
+  gst_object_unref(encoder);
+}

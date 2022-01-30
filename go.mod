@@ -8,7 +8,6 @@ require (
 	github.com/mattn/go-pointer v0.0.1
 	github.com/muxable/rtpio v0.0.0-20211128005935-ff5abe819408
 	github.com/muxable/rtptools v0.1.1-0.20220111193624-e7e107c1cc5b
-	github.com/muxable/transcoder v0.1.2-0.20220111175857-01dcbd62ddbb
 	github.com/pion/ion-sdk-go v0.7.0
 	github.com/pion/rtcp v1.2.9
 	github.com/pion/rtp v1.7.4
@@ -22,6 +21,8 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/muxable/transcoder v0.1.2-0.20220111214347-7d184f1e4bda // indirect
+	github.com/notedit/gst v0.0.9 // indirect
 	github.com/pion/ion v1.10.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
@@ -62,6 +63,6 @@ require (
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20211129164237-f09f9a12af12 // indirect
-	google.golang.org/grpc v1.43.0
+	google.golang.org/grpc v1.43.0 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 )

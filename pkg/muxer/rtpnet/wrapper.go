@@ -44,7 +44,7 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	// we can tolerate much higher packet losses.
 	config.ReferencePacketLossRatio = 0.1
 	config.ReferencePacketMarkingRatio = 0.1
-	config.MinimumRate = 100 * rfc8698.Kbps
+	config.MinimumRate = 164 * rfc8698.Kbps
 	config.MaximumRate = 4 * rfc8698.Mbps
 	w := &CCWrapper{
 		conn:       conn,
@@ -182,11 +182,11 @@ func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 }
 
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
-func (w *CCWrapper) GetEstimatedBitrate() uint32 {
+func (w *CCWrapper) GetEstimatedBitrate() (uint32, float64) {
 	if w.Sender.SenderEstimatedRoundTripTime == 0 {
-		return 1000
+		return 1000, 0
 	}
-	return uint32(w.Sender.GetTargetRate(1000))
+	return uint32(w.Sender.GetTargetRate(1000)), w.Receiver.EstimatedPacketLossRatio
 }
 
 func (w *CCWrapper) Close() error {

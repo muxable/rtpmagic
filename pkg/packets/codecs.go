@@ -69,7 +69,7 @@ var defaultCodecSet = NewCodecSet([]Codec{
 	},
 	{
 		PayloadType:        106,
-		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/h265", ClockRate: 90000},
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/H265", ClockRate: 90000},
 	},
 })
 

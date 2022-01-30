@@ -132,11 +132,12 @@ func main() {
 			defer codecTicker.Stop()
 			jb, jbRTP := rfc7005.NewJitterBuffer(codec.ClockRate, 1*time.Second, rtpIn)
 			// write nacks periodically back to the sender
-			nackTicker := time.NewTicker(150 * time.Millisecond)
+			nackTicker := time.NewTicker(100 * time.Millisecond)
 			defer nackTicker.Stop()
 			done := make(chan bool, 1)
 			defer func() { done <- true }()
 			go func() {
+				prevMissing := make([]bool, 1 << 16)
 				for {
 					select {
 					case <-nackTicker.C:
@@ -144,10 +145,19 @@ func main() {
 						if len(missing) == 0 {
 							break
 						}
+						retained := make([]uint16, 0)
+						nextMissing := make([]bool, 1 << 16)
+						for _, seq := range missing {
+							if prevMissing[seq] {
+								retained = append(retained, seq)
+							}
+							nextMissing[seq] = true
+						}
+						prevMissing = nextMissing
 						nack := &rtcp.TransportLayerNack{
 							SenderSSRC: senderSSRC,
 							MediaSSRC:  uint32(ssrc),
-							Nacks:      rtcp.NackPairsFromSequenceNumbers(missing),
+							Nacks:      rtcp.NackPairsFromSequenceNumbers(retained),
 						}
 						if _, err := rtcpWriter.WriteRTCP([]rtcp.Packet{nack}); err != nil {
 							log.Error().Err(err).Msg("failed to write NACK")
@@ -189,7 +199,7 @@ func pipe(tr *webrtc.TrackRemote) (webrtc.TrackLocal, error) {
 }
 
 func NewRTPSender(rtc *sdk.RTC, tid string, codec *packets.Codec, rtpIn rtpio.RTPReader) error {
-	conn, err := grpc.Dial("35.212.71.185:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial("transcode.mtun.io:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
 	}
