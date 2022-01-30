@@ -7,13 +7,14 @@ package transcoder
 */
 import "C"
 import (
+	"context"
 	"fmt"
 	"time"
 	"unsafe"
 
 	"github.com/mattn/go-pointer"
 	"github.com/muxable/rtpmagic/pkg/muxer"
-	"github.com/muxable/rtpmagic/pkg/packets"
+	"github.com/muxable/rtpmagic/pkg/muxer/nack"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -29,76 +30,83 @@ type Pipeline struct {
 	conn     muxer.MuxerUDPConn
 	cname    string
 
-	videoHandler *SampleHandler
-	audioHandler *SampleHandler
-}
+	videoBuffer *nack.SendBuffer
+	audioBuffer *nack.SendBuffer
 
-func videoPipelineStr(videoSrc, mimeType string) string {
-	switch mimeType {
-	case webrtc.MimeTypeVP8:
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! nvv4l2vp8enc bitrate=1000000 preset-level=1 name=videoencode ! appsink name=videoappsink"
-	case webrtc.MimeTypeVP9:
-		return videoSrc + " ! vp9enc deadline=1 ! appsink name=videoappsink"
-	case webrtc.MimeTypeH264:
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! appsink name=videoappsink"
-	case "video/H265":
-		return videoSrc + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h265enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink"
-	default:
-		panic("unknown mime type")
-	}
-}
+	videoSSRC webrtc.SSRC
+	audioSSRC webrtc.SSRC
 
-func audioPipelineStr(audioSrc, mimeType string) string {
-	switch mimeType {
-	case webrtc.MimeTypeOpus:
-		return audioSrc + " ! audioconvert ! opusenc inband-fec=true name=audioencode ! appsink name=audioappsink"
-	default:
-		panic("unknown mime type")
-	}
+	video *PipelineConfiguration
+	audio *PipelineConfiguration
+
+	ctx context.Context
 }
 
 // CreatePipeline creates a GStreamer Pipeline
 func CreatePipeline(
-	videoSrc string, videoCodec *packets.Codec,
-	audioSrc string, audioCodec *packets.Codec,
+	ctx context.Context,
+	video *PipelineConfiguration,
+	audio *PipelineConfiguration,
 	sink muxer.MuxerUDPConn, cname string) *Pipeline {
-	videoPipelineStr := videoPipelineStr(videoSrc, videoCodec.MimeType)
-	audioPipelineStr := audioPipelineStr(audioSrc, audioCodec.MimeType)
+	log.Printf("%v", fmt.Sprintf("%s\n%s", video.pipeline, audio.pipeline))
 
-	pipelineStrUnsafe := C.CString(fmt.Sprintf("%s\n%s", videoPipelineStr, audioPipelineStr))
+	pipelineStrUnsafe := C.CString(fmt.Sprintf("%s\n%s", video.pipeline, audio.pipeline))
 	defer C.free(unsafe.Pointer(pipelineStrUnsafe))
-	
+
 	return &Pipeline{
 		Pipeline: C.gstreamer_send_create_pipeline(pipelineStrUnsafe),
 		conn:     sink,
 		cname:    cname,
 
-		videoHandler: NewSampleHandler(videoCodec),
-		audioHandler: NewSampleHandler(audioCodec),
+		videoBuffer: nack.NewSendBuffer(14),
+		audioBuffer: nack.NewSendBuffer(14),
+
+		video: video,
+		audio: audio,
+
+		ctx: ctx,
+	}
+}
+
+func SourceDescription(cname string, ssrc webrtc.SSRC) *rtcp.SourceDescription {
+	return &rtcp.SourceDescription{
+		Chunks: []rtcp.SourceDescriptionChunk{{
+			Source: uint32(ssrc),
+			Items:  []rtcp.SourceDescriptionItem{{Type: rtcp.SDESCNAME, Text: cname}},
+		}},
 	}
 }
 
 func (p *Pipeline) writeRTCPLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
-		videoSdes := p.videoHandler.SourceDescription(p.cname)
-		audioSdes := p.audioHandler.SourceDescription(p.cname)
-		if _, err := p.conn.WriteRTCP([]rtcp.Packet{videoSdes, audioSdes}); err != nil {
-			log.Error().Err(err).Msg("failed to write rtcp")
+	for {
+		select {
+		case <-ticker.C:
+			if p.videoSSRC != 0 {
+				if _, err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.videoSSRC)}); err != nil {
+					log.Error().Err(err).Msg("failed to write rtcp")
+				}
+			}
+			if p.audioSSRC != 0 {
+				if _, err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.audioSSRC)}); err != nil {
+					log.Error().Err(err).Msg("failed to write rtcp")
+				}
+			}
+
+			// also update the bitrate in this loop because this is a convenient place to do it.
+			bitrate, loss := p.conn.GetEstimatedBitrate()
+			if bitrate > 64000 {
+				bitrate -= 64000 // subtract off audio bitrate
+			}
+			if bitrate < 100000 {
+				bitrate = 100000
+			}
+			p.video.SetBitrate(p.Pipeline, bitrate)
+			C.gstreamer_set_packet_loss_percentage(p.Pipeline, C.guint(loss*100))
+		case <-p.ctx.Done():
 			return
 		}
-
-		// also update the bitrate in this loop because this is a convenient place to do it.
-		bitrate, loss := p.conn.GetEstimatedBitrate()
-		if bitrate > 64000 {
-			bitrate -= 64000 // subtract off audio bitrate
-		}
-		if bitrate < 100000 {
-			bitrate = 100000
-		}
-		C.gstreamer_set_video_bitrate(p.Pipeline, C.guint(bitrate))
-		C.gstreamer_set_packet_loss_percentage(p.Pipeline, C.guint(loss * 100))
 	}
 }
 
@@ -134,8 +142,8 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 	for _, nack := range pkt.Nacks {
 		for _, id := range nack.PacketList() {
 			switch webrtc.SSRC(pkt.MediaSSRC) {
-			case p.videoHandler.ssrc:
-				if _, q := p.videoHandler.sendBuffer.Get(id); q != nil {
+			case p.videoSSRC:
+				if _, q := p.videoBuffer.Get(id); q != nil {
 					log.Warn().Uint16("Seq", id).Msg("responding to video nack")
 					if _, err := p.conn.WriteRTP(q); err != nil {
 						log.Error().Err(err).Msg("failed to write rtp")
@@ -143,8 +151,8 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 				} else {
 					log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
 				}
-			case p.audioHandler.ssrc:
-				if _, q := p.audioHandler.sendBuffer.Get(id); q != nil {
+			case p.audioSSRC:
+				if _, q := p.audioBuffer.Get(id); q != nil {
 					if _, err := p.conn.WriteRTP(q); err != nil {
 						log.Error().Err(err).Msg("failed to write rtp")
 					}
@@ -163,39 +171,25 @@ func (p *Pipeline) Start() {
 	go p.readRTCPLoop()
 	go p.writeRTCPLoop()
 	C.gstreamer_send_start_pipeline(p.Pipeline, pointer.Save(p))
-}
-
-// Stop stops the GStreamer Pipeline
-func (p *Pipeline) Stop() {
+	<-p.ctx.Done()
 	C.gstreamer_send_stop_pipeline(p.Pipeline)
 }
 
-//export goHandleAudioPipelineBuffer
-func goHandleAudioPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, dts C.ulong, data unsafe.Pointer) {
-	p := pointer.Restore(data).(*Pipeline)
+//export goHandleAudioPipelineRtp
+func goHandleAudioPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, data unsafe.Pointer) {
+	// p := pointer.Restore(data).(*Pipeline)
 
-	samples := uint32(time.Duration(duration).Seconds() * float64(p.audioHandler.ClockRate))
+	// pkt := &rtp.Packet{}
+	// if err := pkt.Unmarshal(C.GoBytes(buffer, bufferLen)); err != nil {
+	// 	log.Error().Err(err).Msg("failed to unmarshal rtp")
+	// 	return
+	// }
 
-	for _, pkt := range p.audioHandler.packetize(C.GoBytes(buffer, bufferLen), samples) {
-		p.audioHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
-		if _, err := p.conn.WriteRTP(pkt); err != nil {
-			log.Error().Err(err).Msg("failed to write rtp")
-		}
-	}
-}
-
-//export goHandleVideoPipelineBuffer
-func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, dts C.ulong, data unsafe.Pointer) {
-	p := pointer.Restore(data).(*Pipeline)
-
-	rtpts := uint32(uint64(dts) / 1000 * (uint64(p.videoHandler.ClockRate) / 1000) / 1000)
-
-	for _, pkt := range p.videoHandler.packetize(C.GoBytes(buffer, bufferLen), rtpts) {
-		p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
-		if _, err := p.conn.WriteRTP(pkt); err != nil {
-			log.Error().Err(err).Msg("failed to write rtp")
-		}
-	}
+	// p.audioSSRC = webrtc.SSRC(pkt.SSRC)
+	// p.audioBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
+	// if _, err := p.conn.WriteRTP(pkt); err != nil {
+	// 	log.Error().Err(err).Msg("failed to write rtp")
+	// }
 }
 
 //export goHandleVideoPipelineRtp
@@ -208,8 +202,8 @@ func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C
 		return
 	}
 
-	p.videoHandler.ssrc = webrtc.SSRC(pkt.SSRC)
-	p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
+	p.videoSSRC = webrtc.SSRC(pkt.SSRC)
+	p.videoBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
 	if _, err := p.conn.WriteRTP(pkt); err != nil {
 		log.Error().Err(err).Msg("failed to write rtp")
 	}

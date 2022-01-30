@@ -32,28 +32,6 @@ static gboolean gstreamer_send_bus_call(GstBus *bus, GstMessage *msg, gpointer d
   return TRUE;
 }
 
-GstFlowReturn gstreamer_send_new_video_sample_handler(GstElement *object, gpointer user_data)
-{
-  GstSample *sample = NULL;
-  GstBuffer *buffer = NULL;
-  gpointer copy = NULL;
-  gsize copy_size = 0;
-
-  g_signal_emit_by_name(object, "pull-sample", &sample);
-  if (sample)
-  {
-    buffer = gst_sample_get_buffer(sample);
-    if (buffer)
-    {
-      gst_buffer_extract_dup(buffer, 0, gst_buffer_get_size(buffer), &copy, &copy_size);
-      goHandleVideoPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), GST_BUFFER_DTS(buffer), user_data);
-    }
-    gst_sample_unref(sample);
-  }
-
-  return GST_FLOW_OK;
-}
-
 GstFlowReturn gstreamer_send_new_video_rtp_handler(GstElement *object, gpointer user_data)
 {
   GstSample *sample = NULL;
@@ -76,7 +54,7 @@ GstFlowReturn gstreamer_send_new_video_rtp_handler(GstElement *object, gpointer 
   return GST_FLOW_OK;
 }
 
-GstFlowReturn gstreamer_send_new_audio_sample_handler(GstElement *object, gpointer user_data)
+GstFlowReturn gstreamer_send_new_audio_rtp_handler(GstElement *object, gpointer user_data)
 {
   GstSample *sample = NULL;
   GstBuffer *buffer = NULL;
@@ -90,7 +68,7 @@ GstFlowReturn gstreamer_send_new_audio_sample_handler(GstElement *object, gpoint
     if (buffer)
     {
       gst_buffer_extract_dup(buffer, 0, gst_buffer_get_size(buffer), &copy, &copy_size);
-      goHandleAudioPipelineBuffer(copy, copy_size, GST_BUFFER_DURATION(buffer), GST_BUFFER_DTS(buffer), user_data);
+      goHandleAudioPipelineRtp(copy, copy_size, GST_BUFFER_DURATION(buffer), user_data);
     }
     gst_sample_unref(sample);
   }
@@ -111,26 +89,15 @@ void gstreamer_send_start_pipeline(GstElement *pipeline, void *data)
   gst_bus_add_watch(bus, gstreamer_send_bus_call, NULL);
   gst_object_unref(bus);
 
-  GstElement *videoappsink = gst_bin_get_by_name(GST_BIN(pipeline), "videoappsink");
-  if (videoappsink != NULL)
-  {
-    g_object_set(videoappsink, "emit-signals", TRUE, NULL);
-    g_signal_connect(videoappsink, "new-sample", G_CALLBACK(gstreamer_send_new_video_sample_handler), data);
-    gst_object_unref(videoappsink);
-  }
-
   GstElement *videortpsink = gst_bin_get_by_name(GST_BIN(pipeline), "videortpsink");
-  if (videortpsink != NULL)
-  {
-    g_object_set(videortpsink, "emit-signals", TRUE, NULL);
-    g_signal_connect(videortpsink, "new-sample", G_CALLBACK(gstreamer_send_new_video_rtp_handler), data);
-    gst_object_unref(videortpsink);
-  }
+  g_object_set(videortpsink, "emit-signals", TRUE, NULL);
+  g_signal_connect(videortpsink, "new-sample", G_CALLBACK(gstreamer_send_new_video_rtp_handler), data);
+  gst_object_unref(videortpsink);
 
-  GstElement *audioappsink = gst_bin_get_by_name(GST_BIN(pipeline), "audioappsink");
-  g_object_set(audioappsink, "emit-signals", TRUE, NULL);
-  g_signal_connect(audioappsink, "new-sample", G_CALLBACK(gstreamer_send_new_audio_sample_handler), data);
-  gst_object_unref(audioappsink);
+  GstElement *audiortpsink = gst_bin_get_by_name(GST_BIN(pipeline), "audiortpsink");
+  g_object_set(audiortpsink, "emit-signals", TRUE, NULL);
+  g_signal_connect(audiortpsink, "new-sample", G_CALLBACK(gstreamer_send_new_audio_rtp_handler), data);
+  gst_object_unref(audiortpsink);
 
   gst_element_set_state(pipeline, GST_STATE_PLAYING);
 }
@@ -140,11 +107,11 @@ void gstreamer_send_stop_pipeline(GstElement *pipeline)
   gst_element_set_state(pipeline, GST_STATE_NULL);
 }
 
-void gstreamer_set_video_bitrate(GstElement *pipeline, unsigned int bitrate)
+void gstreamer_set_video_bitrate(GstElement *pipeline, char *property, unsigned int bitrate)
 {
   GstElement *encoder = gst_bin_get_by_name(GST_BIN(pipeline), "videoencode");
   if (encoder != NULL) {
-    g_object_set(G_OBJECT(encoder), "bitrate", bitrate, NULL);
+    g_object_set(G_OBJECT(encoder), property, bitrate, NULL);
     gst_object_unref(encoder);
   }
 }
