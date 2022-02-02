@@ -28,7 +28,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! nvvidconv interpolation-method=5 ! " +
 					"nvv4l2vp8enc bitrate=1000000 preset-level=1 name=videoencode ! " +
-					"rtpvp8pay pt=96 mtu=1200 ! appsink name=videortpsink async=false sync=false",
+					"appsink name=videoappsink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -36,7 +36,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
 					"nvv4l2h264enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! " +
-					"rtph264pay pt=102 mtu=1200 ! appsink name=videortpsink async=false sync=false",
+					"ppsink name=videoappsink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -44,7 +44,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
 					"nvv4l2h265enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! " +
-					"rtph265pay pt=106 mtu=1200 ! appsink name=videortpsink async=false sync=false",
+					"appsink name=videoappsink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -52,7 +52,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! audioconvert ! " +
 					"opusenc inband-fec=true name=audioencode ! " +
-					"rtpopuspay pt=111 mtu=1200 ! appsink name=audiortpsink async=false sync=false",
+					"appsink name=audioappsink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -65,7 +65,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! videoconvert ! " +
 					"vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=videoencode target-bitrate=6000000 ! " +
-					"rtpvp8pay pt=96 mtu=1200 ! appsink name=videortpsink async=false sync=false",
+					"appsink name=videoappsink sync=true",
 				bitrateProperty: "target-bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -73,7 +73,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! videoconvert ! " +
 					"x264enc tune=zerolatency bitrate=1000000 ! " +
-					"rtph264pay pt=102 mtu=1200 config-interval=1 ! appsink name=videortpsink async=false sync=false",
+					"appsink name=videoappsink sync=true",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1000,
 			}, nil
@@ -81,7 +81,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! videoconvert ! " +
 					"x265enc speed-preset=ultrafast tune=zerolatency bitrate=3000 !" +
-					"rtph265pay pt=106 mtu=1200 config-interval=1 ! appsink name=videortpsink async=false sync=false",
+					"appsink name=videoappsink sync=true",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1000,
 			}, nil
@@ -89,7 +89,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! audioconvert ! " +
 					"opusenc inband-fec=true name=audioencode ! " +
-					"rtpopuspay pt=111 mtu=1200 ! appsink name=audiortpsink async=false sync=false",
+					"appsink name=audioappsink sync=true",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil

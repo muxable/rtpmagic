@@ -23,7 +23,7 @@ func main() {
 	dest := flag.String("dest", "34.85.161.200:5000", "rtp sink destination")
 	flag.Parse()
 
-	video, err := transcoder.NewPipelineConfiguration(*videoSrc, webrtc.MimeTypeH265)
+	video, err := transcoder.NewPipelineConfiguration(*videoSrc, webrtc.MimeTypeH264)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create video pipeline")
 	}
