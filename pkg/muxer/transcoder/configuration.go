@@ -44,7 +44,8 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			return &PipelineConfiguration{
 				pipeline:        source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
 					"nvv4l2h265enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! " +
-					"appsink name=videoappsink async=false sync=false",
+					"rtph265pay config-interval=-1 ! " +
+					"appsink name=videortpsink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil

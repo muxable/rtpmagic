@@ -16,6 +16,7 @@ import (
 	"github.com/muxable/rtpmagic/pkg/muxer"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"github.com/rs/zerolog/log"
 )
@@ -206,5 +207,22 @@ func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duratio
 		if _, err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
 		}
+	}
+}
+
+//export goHandleVideoPipelineRtp
+func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C.ulong, data unsafe.Pointer) {
+	p := pointer.Restore(data).(*Pipeline)
+
+	pkt := &rtp.Packet{}
+	if err := pkt.Unmarshal(C.GoBytes(buffer, bufferLen)); err != nil {
+		log.Error().Err(err).Msg("failed to unmarshal rtp")
+		return
+	}
+
+	p.videoHandler.ssrc = webrtc.SSRC(pkt.SSRC)
+	p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
+	if _, err := p.conn.WriteRTP(pkt); err != nil {
+		log.Error().Err(err).Msg("failed to write rtp")
 	}
 }
