@@ -7,6 +7,7 @@ import (
 
 	"github.com/muxable/rtpmagic/pkg/muxer"
 	"github.com/muxable/rtpmagic/pkg/muxer/transcoder"
+	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -23,7 +24,7 @@ func main() {
 	dest := flag.String("dest", "34.85.161.200:5000", "rtp sink destination")
 	flag.Parse()
 
-	video, err := transcoder.NewPipelineConfiguration(*videoSrc, webrtc.MimeTypeH264)
+	video, err := transcoder.NewPipelineConfiguration(*videoSrc, webrtc.MimeTypeH265)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create video pipeline")
 	}
@@ -31,10 +32,19 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create audio pipeline")
 	}
+	codecs := packets.DefaultCodecSet()
+	videoCodec, ok := codecs.FindByMimeType(webrtc.MimeTypeH265)
+	if !ok {
+		log.Fatal().Err(err).Msg("failed to find video codec")
+	}
+	audioCodec, ok := codecs.FindByMimeType(webrtc.MimeTypeOpus)
+	if !ok {
+		log.Fatal().Err(err).Msg("failed to find audio codec")
+	}
 
 	conn, err := muxer.Dial(*dest, *netsim)
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to dial rtp sink")
 	}
-	transcoder.CreatePipeline(context.Background(), video, audio, conn, *cname).Start()
+	transcoder.CreatePipeline(context.Background(), video, videoCodec, audio, audioCodec, conn, *cname).Start()
 }

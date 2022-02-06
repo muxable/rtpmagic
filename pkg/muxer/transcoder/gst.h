@@ -7,7 +7,6 @@
 #include <stdlib.h>
 
 extern void goHandleVideoPipelineBuffer(void *buffer, int bufferLen, uint64_t samples, uint64_t pts, void *data);
-extern void goHandleVideoPipelineRtp(void *buffer, int bufferLen, uint64_t samples, void *data);
 extern void goHandleAudioPipelineBuffer(void *buffer, int bufferLen, uint64_t samples, uint64_t pts, void *data);
 
 GstElement *gstreamer_send_create_pipeline(char *pipeline);

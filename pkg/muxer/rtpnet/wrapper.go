@@ -5,7 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/muxable/rtpio"
 	"github.com/muxable/rtpmagic/pkg/muxer/nack"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/muxable/rtptools/pkg/rfc5761"
@@ -14,16 +13,17 @@ import (
 	"github.com/muxable/rtptools/pkg/x_time"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	"github.com/pion/rtpio/pkg/rtpio"
 	"github.com/rs/zerolog/log"
 )
 
 // CCWrapper wraps an existing connection with a congestion control handler.
 type CCWrapper struct {
-	conn       io.ReadWriteCloser
-	rtpReader  rtpio.RTPReader
-	rtcpReader rtpio.RTCPReader
-	rtpWriter  rtpio.RTPWriter
-	rtcpWriter rtpio.RTCPWriter
+	io.ReadWriteCloser
+	rtpio.RTPReader
+	rtpio.RTCPReader
+	rtpio.RTPWriter
+	rtpio.RTCPWriter
 
 	Sender   *rfc8698.Sender
 	Receiver *rfc8698.Receiver
@@ -47,15 +47,15 @@ func NewCCWrapper(conn io.ReadWriteCloser, mtu int) *CCWrapper {
 	config.MinimumRate = 164 * rfc8698.Kbps
 	config.MaximumRate = 4 * rfc8698.Mbps
 	w := &CCWrapper{
-		conn:       conn,
-		rtpReader:  rtpReader,
-		rtcpReader: rtcpReader,
-		rtpWriter:  rtpWriter,
-		rtcpWriter: rtcpWriter,
-		Sender:     rfc8698.NewSender(now, config),
-		Receiver:   rfc8698.NewReceiver(now, config),
-		ccBuffer:   nack.NewSendBuffer(14),
-		done:       done,
+		ReadWriteCloser: conn,
+		RTPReader:       rtpReader,
+		RTCPReader:      rtcpReader,
+		RTPWriter:       rtpWriter,
+		RTCPWriter:      rtcpWriter,
+		Sender:          rfc8698.NewSender(now, config),
+		Receiver:        rfc8698.NewReceiver(now, config),
+		ccBuffer:        nack.NewSendBuffer(14),
+		done:            done,
 	}
 
 	go func() {
@@ -91,40 +91,36 @@ func (w *CCWrapper) sendClockSynchronizationPacket() error {
 	if err != nil {
 		return err
 	}
-	if _, err := w.rtcpWriter.WriteRTCP([]rtcp.Packet{&senderClockPacket}); err != nil {
+	if err := w.RTCPWriter.WriteRTCP([]rtcp.Packet{&senderClockPacket}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (w *CCWrapper) ReadRTP(pkt *rtp.Packet) (int, error) {
-	return w.rtpReader.ReadRTP(pkt)
-}
-
-func (w *CCWrapper) WriteRTP(pkt *rtp.Packet) (int, error) {
+func (w *CCWrapper) WriteRTP(pkt *rtp.Packet) error {
 	// attach a cc header to this packet.
 	tcc, err := (&rtp.TransportCCExtension{TransportSequence: w.ccSeq}).Marshal()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if err := pkt.Header.SetExtension(defaultHdrExtID, tcc); err != nil {
-		return 0, err
+		return err
 	}
 
 	w.ccBuffer.Add(w.ccSeq, time.Now(), pkt)
 	w.ccSeq++
 
-	return w.rtpWriter.WriteRTP(pkt)
+	return w.RTPWriter.WriteRTP(pkt)
 }
 
-func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
-	n, err := w.rtcpReader.ReadRTCP(pkts)
+func (w *CCWrapper) ReadRTCP() ([]rtcp.Packet, error) {
+	pkts, err := w.RTCPReader.ReadRTCP()
 	if err != nil {
-		return n, err
+		return nil, err
 	}
 
 	// check if this packet is cc packet.
-	for _, pkt := range pkts[:n] {
+	for _, pkt := range pkts {
 		switch pkt := pkt.(type) {
 		case *rtcp.RawPacket:
 			if pkt.Header().Type == rtcp.TypeTransportSpecificFeedback &&
@@ -132,8 +128,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 				// this is a cc packet.
 				report := &rfc8888.RFC8888Report{}
 				if err := report.Unmarshal(time.Now(), []byte(*pkt)[8:]); err != nil {
-					log.Printf("error %v", err)
-					return n, err
+					return nil, err
 				}
 				// flatten the report across ssrc's because we send a transport-wide sequence number.
 				metrics := []*rfc8888.RFC8888MetricBlock{}
@@ -165,7 +160,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 				pkt.Header().Count == 30 {
 				report := &packets.ReceiverClock{}
 				if err := report.Unmarshal([]byte(*pkt)[4:]); err != nil {
-					return n, err
+					return nil, err
 				}
 				rtpTime := uint32(x_time.GoTimeToNTP(time.Now()) >> 16)
 				delay := time.Duration(float64(report.Delay) / (1 << 16) * float64(time.Second))
@@ -174,11 +169,7 @@ func (w *CCWrapper) ReadRTCP(pkts []rtcp.Packet) (int, error) {
 			}
 		}
 	}
-	return n, err
-}
-
-func (w *CCWrapper) WriteRTCP(pkts []rtcp.Packet) (int, error) {
-	return w.rtcpWriter.WriteRTCP(pkts)
+	return pkts, err
 }
 
 // GetEstimatedBitrate gets the estimated bitrate from the sender.
@@ -191,5 +182,5 @@ func (w *CCWrapper) GetEstimatedBitrate() (uint32, float64) {
 
 func (w *CCWrapper) Close() error {
 	w.done <- true
-	return w.conn.Close()
+	return w.ReadWriteCloser.Close()
 }

@@ -43,22 +43,14 @@ type Pipeline struct {
 func CreatePipeline(
 	ctx context.Context,
 	video *PipelineConfiguration,
+	videoCodec *packets.Codec,
 	audio *PipelineConfiguration,
+	audioCodec *packets.Codec,
 	sink muxer.MuxerUDPConn, cname string) *Pipeline {
 	log.Printf("%v", fmt.Sprintf("%s\n%s", video.pipeline, audio.pipeline))
 
 	pipelineStrUnsafe := C.CString(fmt.Sprintf("%s\n%s", video.pipeline, audio.pipeline))
 	defer C.free(unsafe.Pointer(pipelineStrUnsafe))
-
-	codecs := packets.DefaultCodecSet()
-	videoCodec, ok := codecs.FindByMimeType(webrtc.MimeTypeH264)
-	if !ok {
-		panic("no codec")
-	}
-	audioCodec, ok := codecs.FindByMimeType(webrtc.MimeTypeOpus)
-	if !ok {
-		panic("no codec")
-	}
 
 	return &Pipeline{
 		Pipeline: C.gstreamer_send_create_pipeline(pipelineStrUnsafe),
@@ -91,12 +83,12 @@ func (p *Pipeline) writeRTCPLoop() {
 		select {
 		case <-ticker.C:
 			if p.videoHandler.ssrc != 0 {
-				if _, err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.videoHandler.ssrc)}); err != nil {
+				if err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.videoHandler.ssrc)}); err != nil {
 					log.Error().Err(err).Msg("failed to write rtcp")
 				}
 			}
 			if p.audioHandler.ssrc != 0 {
-				if _, err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.audioHandler.ssrc)}); err != nil {
+				if err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.audioHandler.ssrc)}); err != nil {
 					log.Error().Err(err).Msg("failed to write rtcp")
 				}
 			}
@@ -119,13 +111,12 @@ func (p *Pipeline) writeRTCPLoop() {
 
 func (p *Pipeline) readRTCPLoop() {
 	for {
-		pkts := make([]rtcp.Packet, 16)
-		n, err := p.conn.ReadRTCP(pkts)
+		pkts, err := p.conn.ReadRTCP()
 		if err != nil {
 			log.Warn().Err(err).Msg("connection error")
 			return
 		}
-		for _, pkt := range pkts[:n] {
+		for _, pkt := range pkts {
 			switch pkt := pkt.(type) {
 			case *rtcp.PictureLossIndication:
 				log.Info().Msg("PLI")
@@ -152,7 +143,7 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 			case p.videoHandler.ssrc:
 				if _, q := p.videoHandler.sendBuffer.Get(id); q != nil {
 					log.Warn().Uint16("Seq", id).Msg("responding to video nack")
-					if _, err := p.conn.WriteRTP(q); err != nil {
+					if err := p.conn.WriteRTP(q); err != nil {
 						log.Error().Err(err).Msg("failed to write rtp")
 					}
 				} else {
@@ -160,7 +151,7 @@ func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
 				}
 			case p.audioHandler.ssrc:
 				if _, q := p.audioHandler.sendBuffer.Get(id); q != nil {
-					if _, err := p.conn.WriteRTP(q); err != nil {
+					if err := p.conn.WriteRTP(q); err != nil {
 						log.Error().Err(err).Msg("failed to write rtp")
 					}
 				} else {
@@ -190,7 +181,7 @@ func goHandleAudioPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duratio
 
 	for _, pkt := range p.audioHandler.packetize(C.GoBytes(buffer, bufferLen), samples) {
 		p.audioHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
-		if _, err := p.conn.WriteRTP(pkt); err != nil {
+		if err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
 		}
 	}
@@ -204,7 +195,7 @@ func goHandleVideoPipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duratio
 
 	for _, pkt := range p.videoHandler.packetize(C.GoBytes(buffer, bufferLen), rtpts) {
 		p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
-		if _, err := p.conn.WriteRTP(pkt); err != nil {
+		if err := p.conn.WriteRTP(pkt); err != nil {
 			log.Error().Err(err).Msg("failed to write rtp")
 		}
 	}
@@ -222,7 +213,8 @@ func goHandleVideoPipelineRtp(buffer unsafe.Pointer, bufferLen C.int, duration C
 
 	p.videoHandler.ssrc = webrtc.SSRC(pkt.SSRC)
 	p.videoHandler.sendBuffer.Add(pkt.SequenceNumber, time.Now(), pkt)
-	if _, err := p.conn.WriteRTP(pkt); err != nil {
+
+	if err := p.conn.WriteRTP(pkt); err != nil {
 		log.Error().Err(err).Msg("failed to write rtp")
 	}
 }

@@ -11,11 +11,11 @@ import (
 type UDPConnWithErrorHandler struct {
 	*net.UDPConn
 
-	onError func(error)
+	onError   func(error)
 	errorOnce sync.Once
 
 	lastReceived time.Time
-	cancel context.CancelFunc
+	cancel       context.CancelFunc
 }
 
 var errConnectionTimeout = errors.New("connection timeout")
@@ -23,10 +23,10 @@ var errConnectionTimeout = errors.New("connection timeout")
 func NewUDPConnWithErrorHandler(conn *net.UDPConn, onError func(error)) *UDPConnWithErrorHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &UDPConnWithErrorHandler{
-		UDPConn: conn,
-		onError: onError,
+		UDPConn:      conn,
+		onError:      onError,
 		lastReceived: time.Now(),
-		cancel: cancel,
+		cancel:       cancel,
 	}
 	go func() {
 		ticker := time.NewTicker(time.Second * 10)
@@ -34,7 +34,7 @@ func NewUDPConnWithErrorHandler(conn *net.UDPConn, onError func(error)) *UDPConn
 		for {
 			select {
 			case <-ticker.C:
-				if time.Since(c.lastReceived) > time.Second * 10 {
+				if time.Since(c.lastReceived) > time.Second*10 {
 					c.errorOnce.Do(func() {
 						go c.onError(errConnectionTimeout)
 					})

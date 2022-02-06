@@ -4,9 +4,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/muxable/rtpio"
 	"github.com/muxable/rtpmagic/pkg/muxer/balancer"
 	"github.com/muxable/rtpmagic/test/netsim"
+	"github.com/pion/rtpio/pkg/rtpio"
 )
 
 type MuxerUDPConn interface {

@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muxable/rtpio"
 	"github.com/muxable/rtpmagic/pkg/muxer/rtpnet"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	"github.com/pion/rtpio/pkg/rtpio"
 	"github.com/rs/zerolog/log"
 )
 
@@ -136,8 +136,8 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 
 func readRTPLoop(conn *rtpnet.CCWrapper, readCh chan *rtp.Packet) {
 	for {
-		p := &rtp.Packet{}
-		if _, err := conn.ReadRTP(p); err != nil {
+		p, err := conn.ReadRTP()
+		if err != nil {
 			log.Warn().Msgf("failed to read: %v", err)
 			return
 		}
@@ -147,8 +147,8 @@ func readRTPLoop(conn *rtpnet.CCWrapper, readCh chan *rtp.Packet) {
 
 func readRTCPLoop(conn *rtpnet.CCWrapper, readCh chan []rtcp.Packet) {
 	for {
-		pkts := make([]rtcp.Packet, 16)
-		if _, err := conn.ReadRTCP(pkts); err != nil {
+		pkts, err := conn.ReadRTCP()
+		if err != nil {
 			log.Warn().Msgf("failed to read: %v", err)
 			return
 		}
@@ -157,22 +157,21 @@ func readRTCPLoop(conn *rtpnet.CCWrapper, readCh chan []rtcp.Packet) {
 }
 
 // ReadRTP reads from the read channel.
-func (n *BalancedUDPConn) ReadRTP(p *rtp.Packet) (int, error) {
-	q, ok := <-n.readRTPCh
+func (n *BalancedUDPConn) ReadRTP() (*rtp.Packet, error) {
+	p, ok := <-n.readRTPCh
 	if !ok {
-		return 0, io.EOF
+		return nil, io.EOF
 	}
-	*p = *q
-	return q.MarshalSize(), nil
+	return p, nil
 }
 
 // ReadRTCP reads an RTCP packet.
-func (n *BalancedUDPConn) ReadRTCP(pkts []rtcp.Packet) (int, error) {
-	q, ok := <-n.readRTCPCh
+func (n *BalancedUDPConn) ReadRTCP() ([]rtcp.Packet, error) {
+	p, ok := <-n.readRTCPCh
 	if !ok {
-		return 0, io.EOF
+		return nil, io.EOF
 	}
-	return copy(pkts, q), nil
+	return p, nil
 }
 
 func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
@@ -198,18 +197,18 @@ func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
 var errNoConnection = errors.New("no connection available")
 
 // WriteRTP writes an RTP packet.
-func (n *BalancedUDPConn) WriteRTP(p *rtp.Packet) (int, error) {
+func (n *BalancedUDPConn) WriteRTP(p *rtp.Packet) error {
 	n.RLock()
 	defer n.RUnlock()
 
 	if conn := n.randomConn(); conn != nil {
 		return conn.WriteRTP(p)
 	}
-	return 0, errNoConnection
+	return errNoConnection
 }
 
 // WriteRTCP writes an RTCP packet.
-func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
+func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) error {
 	n.RLock()
 	defer n.RUnlock()
 
@@ -217,7 +216,7 @@ func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 	if conn := n.randomConn(); conn != nil {
 		return conn.WriteRTCP(pkts)
 	}
-	return 0, errNoConnection
+	return errNoConnection
 }
 
 // GetEstimatedBitrate gets the estimated bitrate of the sender.

@@ -25,11 +25,6 @@ type SampleHandler struct {
 var ssrcRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func NewSampleHandler(codec *packets.Codec) *SampleHandler {
-	if codec.MimeType == "video/H265" {
-		return &SampleHandler{
-			sendBuffer: nack.NewSendBuffer(14),
-		}
-	}
 	ssrc := ssrcRand.Uint32()
 	payloader := codec.Payloader()
 	sequencer := rtp.NewRandomSequencer()

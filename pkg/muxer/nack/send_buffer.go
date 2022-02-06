@@ -23,8 +23,8 @@ type SendBuffer struct {
 
 func NewSendBuffer(size uint16) *SendBuffer {
 	return &SendBuffer{
-		packets:    make([]*rtp.Packet, 1 << size),
-		timestamps: make([]*time.Time, 1 << size),
+		packets:    make([]*rtp.Packet, 1<<size),
+		timestamps: make([]*time.Time, 1<<size),
 		size:       1 << size,
 	}
 }

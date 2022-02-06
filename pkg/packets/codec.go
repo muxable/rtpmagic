@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/muxable/rtptools/pkg/h265"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v3"
@@ -13,7 +14,6 @@ type Codec struct {
 	webrtc.RTPCodecCapability
 	webrtc.PayloadType
 	Payloader func() rtp.Payloader
-
 }
 
 // Type gets the type of codec (video or audio) based on the mime type.
@@ -70,6 +70,9 @@ var defaultCodecSet = NewCodecSet([]Codec{
 	{
 		PayloadType:        106,
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/H265", ClockRate: 90000},
+		Payloader: func() rtp.Payloader {
+			return &h265.H265Payloader{}
+		},
 	},
 })
 

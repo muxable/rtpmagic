@@ -30,14 +30,11 @@ type NetSimUDPConn struct {
 
 	addr              *net.UDPAddr
 	activeConnections []*rtpnet.CCWrapper
-	seq               map[*ThrottledConn]uint16
 	closed            bool
 	configs           []*ConnectionState
 	readRTPCh         chan *rtp.Packet
 	readRTCPCh        chan []rtcp.Packet
 }
-
-const defaultHdrExtID = 5
 
 func NewNetSimUDPConn(addr *net.UDPAddr, configs []*ConnectionState) (*NetSimUDPConn, error) {
 	n := &NetSimUDPConn{
@@ -92,8 +89,8 @@ func (n *NetSimUDPConn) reconnect(i int) error {
 	conn := rtpnet.NewCCWrapper(tc, 1500)
 	go func() {
 		for {
-			p := &rtp.Packet{}
-			if _, err := conn.ReadRTP(p); err != nil {
+			p, err := conn.ReadRTP()
+			if err != nil {
 				log.Warn().Msgf("failed to read: %v", err)
 				return
 			}
@@ -102,8 +99,8 @@ func (n *NetSimUDPConn) reconnect(i int) error {
 	}()
 	go func() {
 		for {
-			p := make([]rtcp.Packet, 16)
-			if _, err := conn.ReadRTCP(p); err != nil {
+			p, err := conn.ReadRTCP()
+			if err != nil {
 				log.Warn().Msgf("failed to read: %v", err)
 				return
 			}
@@ -115,32 +112,31 @@ func (n *NetSimUDPConn) reconnect(i int) error {
 }
 
 // ReadRTP reads from the read channel.
-func (n *NetSimUDPConn) ReadRTP(p *rtp.Packet) (int, error) {
-	q, ok := <-n.readRTPCh
+func (n *NetSimUDPConn) ReadRTP() (*rtp.Packet, error) {
+	p, ok := <-n.readRTPCh
 	if !ok {
-		return 0, io.EOF
+		return nil, io.EOF
 	}
-	*p = *q
-	return p.MarshalSize(), nil
+	return p, nil
 }
 
 // ReadRTCP reads an RTCP packet.
-func (n *NetSimUDPConn) ReadRTCP(p []rtcp.Packet) (int, error) {
-	q, ok := <-n.readRTCPCh
+func (n *NetSimUDPConn) ReadRTCP() ([]rtcp.Packet, error) {
+	p, ok := <-n.readRTCPCh
 	if !ok {
-		return 0, io.EOF
+		return nil, io.EOF
 	}
-	return copy(p, q), nil
+	return p, nil
 }
 
 // WriteRTP writes an RTP packet.
-func (n *NetSimUDPConn) WriteRTP(p *rtp.Packet) (int, error) {
+func (n *NetSimUDPConn) WriteRTP(p *rtp.Packet) error {
 	i := rand.Intn(len(n.activeConnections))
 	config := n.configs[i]
 	writeCount := 1
 	if rand.Float64() < config.DropRate {
 		// this packet got dropped.
-		return p.MarshalSize(), nil
+		return nil
 	}
 	if rand.Float64() < config.DuplicateRate {
 		// this packet got duplicated.
@@ -152,22 +148,22 @@ func (n *NetSimUDPConn) WriteRTP(p *rtp.Packet) (int, error) {
 		n.RLock()
 		defer n.RUnlock()
 		for j := 0; j < writeCount; j++ {
-			if _, err := conn.WriteRTP(p); err != nil {
+			if err := conn.WriteRTP(p); err != nil {
 				log.Warn().Msgf("failed to write: %v", err)
 			}
 		}
 	}()
-	return p.MarshalSize(), nil
+	return nil
 }
 
 // WriteRTCP writes an RTCP packet.
-func (n *NetSimUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
+func (n *NetSimUDPConn) WriteRTCP(pkts []rtcp.Packet) error {
 	i := rand.Intn(len(n.activeConnections))
 	config := n.configs[i]
 	writeCount := 1
 	if rand.Float64() < config.DropRate {
 		// this packet got dropped.
-		return len(pkts), nil
+		return nil
 	}
 	if rand.Float64() < config.DuplicateRate {
 		// this packet got duplicated.
@@ -179,12 +175,12 @@ func (n *NetSimUDPConn) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 		n.RLock()
 		defer n.RUnlock()
 		for j := 0; j < writeCount; j++ {
-			if _, err := conn.WriteRTCP(pkts); err != nil {
+			if err := conn.WriteRTCP(pkts); err != nil {
 				log.Warn().Msgf("failed to write: %v", err)
 			}
 		}
 	}()
-	return len(pkts), nil
+	return nil
 }
 
 func (n *NetSimUDPConn) GetEstimatedBitrate() (uint32, float64) {
