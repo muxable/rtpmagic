@@ -3,9 +3,11 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"github.com/muxable/rtpmagic/pkg/muxer"
 	"github.com/muxable/rtpmagic/pkg/muxer/encoder"
+	"github.com/muxable/rtpmagic/pkg/muxer/nack"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -50,6 +52,9 @@ func main() {
 	}
 
 	enc, err := encoder.NewEncoder(*cname)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create encoder")
+	}
 
 	audioSource, err := enc.AddSource(*audioSrc, audioCodec)
 	if err != nil {
@@ -61,6 +66,9 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to create video encoder")
 	}
 
+	audioSendBuffer := nack.NewSendBuffer(14)
+	videoSendBuffer := nack.NewSendBuffer(14)
+
 	if err := conn.WriteRTCP([]rtcp.Packet{SourceDescription(*cname, audioSource.SSRC()), SourceDescription(*cname, videoSource.SSRC())}); err != nil {
 		log.Fatal().Err(err).Msg("failed to write rtcp packet")
 	}
@@ -68,38 +76,79 @@ func main() {
 	go rtpio.CopyRTP(conn, audioSource)
 	go rtpio.CopyRTP(conn, videoSource)
 
-	// go func() {
-	// 	ticker := time.NewTicker(100 * time.Millisecond)
-	// 	defer ticker.Stop()
-	// 	for {
-	// 		select {
-	// 		case <-ticker.C:
-	// 			if videoSource.ssrc != 0 {
-	// 				if err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.videoHandler.ssrc)}); err != nil {
-	// 					log.Error().Err(err).Msg("failed to write rtcp")
-	// 				}
-	// 			}
-	// 			if p.audioHandler.ssrc != 0 {
-	// 				if err := p.conn.WriteRTCP([]rtcp.Packet{SourceDescription(p.cname, p.audioHandler.ssrc)}); err != nil {
-	// 					log.Error().Err(err).Msg("failed to write rtcp")
-	// 				}
-	// 			}
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteRTCP([]rtcp.Packet{SourceDescription(*cname, audioSource.SSRC()), SourceDescription(*cname, videoSource.SSRC())}); err != nil {
+					log.Fatal().Err(err).Msg("failed to write rtcp packet")
+				}
 
-	// 			// also update the bitrate in this loop because this is a convenient place to do it.
-	// 			bitrate, loss := p.conn.GetEstimatedBitrate()
-	// 			if bitrate > 64000 {
-	// 				bitrate -= 64000 // subtract off audio bitrate
-	// 			}
-	// 			if bitrate < 100000 {
-	// 				bitrate = 100000
-	// 			}
-	// 			p.video.SetBitrate(p.Pipeline, bitrate)
-	// 			C.gstreamer_set_packet_loss_percentage(p.Pipeline, C.guint(loss*100))
-	// 		case <-p.ctx.Done():
-	// 			return
-	// 		}
-	// 	}
-	// }()
+				// also update the bitrate in this loop because this is a convenient place to do it.
+				bitrate, loss := conn.GetEstimatedBitrate()
+				if bitrate > 64000 {
+					bitrate -= 64000 // subtract off audio bitrate
+				}
+				if bitrate < 100000 {
+					bitrate = 100000
+				}
+				videoSource.SetBitrate(bitrate)
+				audioSource.SetPacketLossPercentage(uint32(loss * 100))
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			pkts, err := conn.ReadRTCP()
+			if err != nil {
+				log.Warn().Err(err).Msg("connection error")
+				return
+			}
+			for _, pkt := range pkts {
+				switch pkt := pkt.(type) {
+				case *rtcp.PictureLossIndication:
+					log.Info().Msg("PLI")
+				case *rtcp.ReceiverReport:
+					log.Info().Msg("Receiver Report")
+				case *rtcp.Goodbye:
+					log.Info().Msg("Goodbye")
+				case *rtcp.TransportLayerNack:
+					for _, nack := range pkt.Nacks {
+						for _, id := range nack.PacketList() {
+							switch webrtc.SSRC(pkt.MediaSSRC) {
+							case videoSource.SSRC():
+								if _, q := videoSendBuffer.Get(id); q != nil {
+									log.Warn().Uint16("Seq", id).Msg("responding to video nack")
+									if err := conn.WriteRTP(q); err != nil {
+										log.Error().Err(err).Msg("failed to write rtp")
+									}
+								} else {
+									log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
+								}
+							case audioSource.SSRC():
+								if _, q := audioSendBuffer.Get(id); q != nil {
+									if err := conn.WriteRTP(q); err != nil {
+										log.Error().Err(err).Msg("failed to write rtp")
+									}
+								} else {
+									log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
+								}
+							default:
+								log.Error().Uint32("SSRC", pkt.MediaSSRC).Msg("nack referring to unknown ssrc")
+							}
+						}
+					}
+				case *rtcp.TransportLayerCC:
+					log.Info().Msg("Transport Layer CC")
+				default:
+					// log.Info().Msgf("unknown rtcp packet: %v", pkt)
+				}
+			}
+		}
+	}()
 
 	select {}
 }

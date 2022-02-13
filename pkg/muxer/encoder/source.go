@@ -9,6 +9,10 @@ package encoder
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
 #include <gst/sdp/gstsdpmessage.h>
+
+void X_gst_g_object_set_uint(GstElement *e, const gchar* p_name, guint p_value) {
+  g_object_set(G_OBJECT(e), p_name, p_value, NULL);
+}
 */
 import "C"
 import (
@@ -18,14 +22,13 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/muxable/rtpmagic/pkg/muxer/transcoder"
 	"github.com/muxable/rtpmagic/pkg/packets"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
 type Source struct {
-	cfg     *transcoder.PipelineConfiguration
+	cfg     *PipelineConfiguration
 	element *C.GstElement
 	sink    *C.GstAppSink
 	encoder *C.GstElement
@@ -35,15 +38,15 @@ type Source struct {
 
 // CreatePipeline creates a GStreamer Pipeline
 func (e *Encoder) AddSource(source string, codec *packets.Codec) (*Source, error) {
-	p, err := transcoder.NewPipelineConfiguration(source, codec.MimeType)
+	p, err := NewPipelineConfiguration(source, codec.MimeType)
 	if err != nil {
 		return nil, err
 	}
 
-	pipelineStr := C.CString(p.Pipeline)
+	pipelineStr := C.CString(p.pipeline)
 	defer C.free(unsafe.Pointer(pipelineStr))
 
-	log.Printf("%v", p.Pipeline)
+	log.Printf("%v", p.pipeline)
 
 	var gerr *C.GError
 	element := C.gst_parse_bin_from_description(pipelineStr, C.int(0), (**C.GError)(&gerr))
@@ -72,7 +75,7 @@ func (e *Encoder) AddSource(source string, codec *packets.Codec) (*Source, error
 	cencoder := C.CString("encoder")
 	defer C.free(unsafe.Pointer(cencoder))
 
-	encoder := C.gst_bin_get_by_name(bin, csink)
+	encoder := C.gst_bin_get_by_name(bin, cencoder)
 
 	pad := C.gst_element_get_static_pad(sink, csink)
 	if pad == nil {
@@ -148,31 +151,17 @@ func (s *Source) SSRC() webrtc.SSRC {
 	return s.ssrc
 }
 
-// func (p *Encoder) readRTCPLoop() {
-// 	for {
-// 		pkts, err := p.conn.ReadRTCP()
-// 		if err != nil {
-// 			log.Warn().Err(err).Msg("connection error")
-// 			return
-// 		}
-// 		for _, pkt := range pkts {
-// 			switch pkt := pkt.(type) {
-// 			case *rtcp.PictureLossIndication:
-// 				log.Info().Msg("PLI")
-// 			case *rtcp.ReceiverReport:
-// 				log.Info().Msg("Receiver Report")
-// 			case *rtcp.Goodbye:
-// 				log.Info().Msg("Goodbye")
-// 			case *rtcp.TransportLayerNack:
-// 				p.handleNack(pkt)
-// 			case *rtcp.TransportLayerCC:
-// 				log.Info().Msg("Transport Layer CC")
-// 			default:
-// 				// log.Info().Msgf("unknown rtcp packet: %v", pkt)
-// 			}
-// 		}
-// 	}
-// }
+func (s *Source) SetBitrate(bitrate uint32) {
+	cstr := C.CString(s.cfg.bitrateProperty)
+	defer C.free(unsafe.Pointer(cstr))
+	C.X_gst_g_object_set_uint(s.encoder, cstr, C.guint(bitrate/s.cfg.bitrateDivisor))
+}
+
+func (s *Source) SetPacketLossPercentage(loss uint32) {
+	cstr := C.CString("packet-loss-percentage")
+	defer C.free(unsafe.Pointer(cstr))
+	C.X_gst_g_object_set_uint(s.encoder, cstr, C.guint(loss))
+}
 
 func (s *Source) ReadRTP() (*rtp.Packet, error) {
 	sample := C.gst_app_sink_pull_sample(s.sink)
@@ -197,32 +186,3 @@ func (s *Source) ReadRTP() (*rtp.Packet, error) {
 	}
 	return pkt, nil
 }
-
-// // handleNack handles a rtcp.TransportLayerNack from the receiver.
-// func (p *Pipeline) handleNack(pkt *rtcp.TransportLayerNack) {
-// 	for _, nack := range pkt.Nacks {
-// 		for _, id := range nack.PacketList() {
-// 			switch webrtc.SSRC(pkt.MediaSSRC) {
-// 			case p.videoHandler.ssrc:
-// 				if _, q := p.videoHandler.sendBuffer.Get(id); q != nil {
-// 					log.Warn().Uint16("Seq", id).Msg("responding to video nack")
-// 					if err := p.conn.WriteRTP(q); err != nil {
-// 						log.Error().Err(err).Msg("failed to write rtp")
-// 					}
-// 				} else {
-// 					log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
-// 				}
-// 			case p.audioHandler.ssrc:
-// 				if _, q := p.audioHandler.sendBuffer.Get(id); q != nil {
-// 					if err := p.conn.WriteRTP(q); err != nil {
-// 						log.Error().Err(err).Msg("failed to write rtp")
-// 					}
-// 				} else {
-// 					log.Warn().Uint16("Seq", id).Msg("nack referring to missing packet")
-// 				}
-// 			default:
-// 				log.Error().Uint32("SSRC", pkt.MediaSSRC).Msg("nack referring to unknown ssrc")
-// 			}
-// 		}
-// 	}
-// }
