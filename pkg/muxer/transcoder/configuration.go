@@ -16,7 +16,7 @@ import (
 )
 
 type PipelineConfiguration struct {
-	pipeline        string
+	Pipeline        string
 	bitrateProperty string
 	bitrateDivisor  uint32
 }
@@ -26,33 +26,33 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 		switch mimeType {
 		case webrtc.MimeTypeVP8:
 			return &PipelineConfiguration{
-				pipeline: source + " ! nvvidconv interpolation-method=5 ! " +
+				Pipeline: source + " ! nvvidconv interpolation-method=5 ! " +
 					"nvv4l2vp8enc bitrate=1000000 preset-level=1 name=videoencode ! " +
-					"appsink name=videoappsink async=false sync=false",
+					"appsink name=sink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
 		case webrtc.MimeTypeH264:
 			return &PipelineConfiguration{
-				pipeline: source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
+				Pipeline: source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
 					"nvv4l2h264enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h264,stream-format=byte-stream ! " +
-					"ppsink name=videoappsink async=false sync=false",
+					"appsink name=sink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
 		case webrtc.MimeTypeH265:
 			return &PipelineConfiguration{
-				pipeline: source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
+				Pipeline: source + " ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),format=I420 ! " +
 					"nvv4l2h265enc bitrate=1000000 preset-level=4 EnableTwopassCBR=true insert-sps-pps=true name=videoencode ! video/x-h265,stream-format=byte-stream ! " +
-					"appsink name=appsink async=false sync=false",
+					"appsink name=sink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
 		case webrtc.MimeTypeOpus:
 			return &PipelineConfiguration{
-				pipeline: source + " ! audioconvert ! " +
-					"opusenc inband-fec=true name=audioencode ! " +
-					"appsink name=audioappsink async=false sync=false",
+				Pipeline: source + " ! audioconvert ! " +
+					"opusenc name=audioencode ! " +
+					"appsink name=sink async=false sync=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
@@ -63,7 +63,7 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 		switch mimeType {
 		case webrtc.MimeTypeVP8:
 			return &PipelineConfiguration{
-				pipeline: source + " ! videoconvert ! " +
+				Pipeline: source + " ! videoconvert ! " +
 					"vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 name=videoencode target-bitrate=6000000 ! " +
 					"appsink name=videoappsink sync=true",
 				bitrateProperty: "target-bitrate",
@@ -71,25 +71,27 @@ func NewPipelineConfiguration(source, mimeType string) (*PipelineConfiguration, 
 			}, nil
 		case webrtc.MimeTypeH264:
 			return &PipelineConfiguration{
-				pipeline: source + " ! videoconvert ! " +
+				Pipeline: source + " ! videoconvert ! video/x-raw,format=I420 ! " +
 					"x264enc tune=zerolatency bitrate=1000000 ! " +
-					"appsink name=videoappsink sync=true",
+					"appsink name=sink sync=true",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1000,
 			}, nil
 		case webrtc.MimeTypeH265:
 			return &PipelineConfiguration{
-				pipeline: source + " ! videoconvert ! " +
-					"x265enc speed-preset=ultrafast tune=zerolatency bitrate=3000 !" +
-					"appsink name=videoappsink sync=true",
+				Pipeline: source + " ! videoconvert ! " +
+					"x265enc speed-preset=ultrafast tune=zerolatency bitrate=3000 ! " +
+					"rtph265pay mtu=1200 pt=106 ! " +
+					"appsink name=sink sync=false async=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1000,
 			}, nil
 		case webrtc.MimeTypeOpus:
 			return &PipelineConfiguration{
-				pipeline: source + " ! audioconvert ! " +
-					"opusenc inband-fec=true name=audioencode ! " +
-					"appsink name=audioappsink sync=true",
+				Pipeline: source + " ! audioconvert ! " +
+					"opusenc name=audioencode ! " +
+					"rtpopuspay mtu=1200 pt=111 ! " +
+					"appsink name=sink sync=false async=false",
 				bitrateProperty: "bitrate",
 				bitrateDivisor:  1,
 			}, nil
