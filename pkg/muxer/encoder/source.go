@@ -95,10 +95,10 @@ func (e *Encoder) AddSource(source string, codec *packets.Codec) (*Source, error
 		}
 		defer C.gst_caps_unref(caps)
 
-		// ccaps := C.gst_caps_to_string(caps)
-		// defer C.free(unsafe.Pointer(ccaps))
+		ccaps := C.gst_caps_to_string(caps)
+		defer C.free(unsafe.Pointer(ccaps))
 
-		// log.Printf("caps: %v", C.GoString(ccaps))
+		log.Printf("caps: %v", C.GoString(ccaps))
 
 		structure := C.gst_caps_get_structure(caps, C.guint(0))
 
