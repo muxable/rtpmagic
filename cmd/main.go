@@ -13,7 +13,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/pion/rtcp"
-	"github.com/pion/rtpio/pkg/rtpio"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -73,8 +72,32 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to write rtcp packet")
 	}
 
-	go rtpio.CopyRTP(conn, audioSource)
-	go rtpio.CopyRTP(conn, videoSource)
+	go func() {
+		for {
+			p, err := audioSource.ReadRTP()
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to read rtp packet")
+				return
+			}
+			audioSendBuffer.Add(p.SequenceNumber, time.Now(), p)
+			if err := conn.WriteRTP(p); err != nil {
+				log.Warn().Err(err).Msg("failed to write rtp packet")
+			}
+		}
+	}()
+	go func() {
+		for {
+			p, err := videoSource.ReadRTP()
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to read rtp packet")
+				return
+			}
+			videoSendBuffer.Add(p.SequenceNumber, time.Now(), p)
+			if err := conn.WriteRTP(p); err != nil {
+				log.Warn().Err(err).Msg("failed to write rtp packet")
+			}
+		}
+	}()
 
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
