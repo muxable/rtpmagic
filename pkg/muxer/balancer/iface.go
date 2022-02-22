@@ -1,11 +1,8 @@
 package balancer
 
 import (
-	"log"
 	"net"
 	"strings"
-
-	"github.com/muxable/rtpmagic/pkg/muxer/balancer/bind"
 )
 
 func GetLocalAddresses() (map[string]bool, error) {
@@ -36,17 +33,4 @@ func GetLocalAddresses() (map[string]bool, error) {
 		}
 	}
 	return names, nil
-}
-
-func DialVia(to *net.UDPAddr, via string) (*net.UDPConn, error) {
-	conn, err := net.DialUDP("udp", nil, to)
-	if err != nil {
-		log.Printf("error dialing to %v %v", to, err)
-		return nil, err
-	}
-	if err := bind.BindToDevice(*conn, via); err != nil {
-		log.Printf("error binding to device %v %v", via, err)
-		return nil, err
-	}
-	return conn, nil
 }

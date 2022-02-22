@@ -10,39 +10,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muxable/rtpmagic/pkg/muxer/balancer/bind"
 	"github.com/muxable/rtpmagic/pkg/muxer/rtpnet"
-	"github.com/pion/rtcp"
-	"github.com/pion/rtp"
-	"github.com/pion/rtpio/pkg/rtpio"
 	"github.com/rs/zerolog/log"
+	"go.uber.org/multierr"
 )
+
+type readResult struct {
+	buf  []byte
+	addr net.Addr
+}
 
 type BalancedUDPConn struct {
 	sync.RWMutex
 
-	rtpio.RTPReadWriteCloser
-	rtpio.RTCPReadWriteCloser
-
-	addr       *net.UDPAddr
-	conns      map[string]*rtpnet.CCWrapper
-	readRTPCh  chan *rtp.Packet
-	readRTCPCh chan []rtcp.Packet
-	cancel     context.CancelFunc
+	conns  map[string]*rtpnet.CCWrapper
+	readCh chan *readResult
+	cancel context.CancelFunc
 
 	cleanup sync.Map
 }
 
-func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*BalancedUDPConn, error) {
+func NewBalancedUDPConn(pollingInterval time.Duration) (*BalancedUDPConn, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	n := &BalancedUDPConn{
-		addr:       addr,
-		conns:      make(map[string]*rtpnet.CCWrapper),
-		readRTPCh:  make(chan *rtp.Packet, 128),
-		readRTCPCh: make(chan []rtcp.Packet, 128),
-		cancel:     cancel,
-		cleanup:    sync.Map{},
+		conns:   make(map[string]*rtpnet.CCWrapper),
+		readCh:  make(chan *readResult),
+		cancel:  cancel,
+		cleanup: sync.Map{},
 	}
-	if err := n.bindLocalAddresses(addr); err != nil {
+	if err := n.bindLocalAddresses(); err != nil {
 		return nil, err
 	}
 	go func() {
@@ -51,7 +48,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 		for {
 			select {
 			case <-ticker.C:
-				if err := n.bindLocalAddresses(addr); err != nil {
+				if err := n.bindLocalAddresses(); err != nil {
 					log.Warn().Msgf("failed to get local addresses: %v", err)
 				}
 			case <-ctx.Done():
@@ -63,7 +60,7 @@ func NewBalancedUDPConn(addr *net.UDPAddr, pollingInterval time.Duration) (*Bala
 }
 
 // bindLocalAddresses binds the local addresses to the UDPConn.
-func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
+func (n *BalancedUDPConn) bindLocalAddresses() error {
 	// get the network interfaces.
 	devices, err := GetLocalAddresses()
 	if err != nil {
@@ -74,28 +71,40 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 	// add any interfaces that are not already active.
 	for device := range devices {
 		if _, ok := n.conns[device]; !ok {
-			conn, err := DialVia(addr, device)
+			conn, err := net.ListenUDP("udp", &net.UDPAddr{})
 			if err != nil {
-				log.Warn().Msgf("failed to connect to %s: %v", addr, err)
+				log.Warn().Msgf("failed to connect %v", err)
 				continue
 			}
-			wrapped := rtpnet.NewCCWrapper(NewUDPConnWithErrorHandler(
-				conn,
-				func(err error) {
-					n.Lock()
-					log.Printf("waiting for error lock")
-					defer log.Printf("unlocking error lock")
-					defer n.Unlock()
-					if conn, ok := n.conns[device]; ok {
-						go conn.Close()
-						delete(n.conns, device)
+			if err := bind.BindToDevice(conn, device); err != nil {
+				log.Printf("error binding to device %v %v", device, err)
+				continue
+			}
+			wrapped := rtpnet.NewCCWrapper(conn)
+			go func() {
+				buf := make([]byte, 1500)
+				for {
+					if err := wrapped.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
+						log.Warn().Msgf("failed to set read deadline: %v", err)
 					}
-					log.Warn().Err(err).Msgf("udp error on %s", device)
-				}), 1500)
-			go readRTPLoop(wrapped, n.readRTPCh)
-			go readRTCPLoop(wrapped, n.readRTCPCh)
+					m, addr, err := wrapped.ReadFrom(buf)
+					if err != nil {
+						n.Lock()
+						if conn, ok := n.conns[device]; ok {
+							go conn.Close()
+							delete(n.conns, device)
+						}
+						n.Unlock()
+						log.Warn().Err(err).Msgf("udp error on %s", device)
+					}
+					n.readCh <- &readResult{
+						buf:  buf[:m],
+						addr: addr,
+					}
+				}
+			}()
 			n.conns[device] = wrapped
-			log.Info().Msgf("connected to %s via %s", addr, device)
+			log.Info().Msgf("connected via %s", device)
 		}
 	}
 	// remove any interfaces that are no longer active.
@@ -104,7 +113,7 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 			// remove this interface.
 			go conn.Close() // this can block so ignore.
 			delete(n.conns, device)
-			log.Info().Msgf("disconnected from %s via %s", addr, device)
+			log.Info().Msgf("disconnected via %s", device)
 		}
 	}
 	log.Printf("unlocking local addr")
@@ -134,44 +143,12 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 	return nil
 }
 
-func readRTPLoop(conn *rtpnet.CCWrapper, readCh chan *rtp.Packet) {
-	for {
-		p, err := conn.ReadRTP()
-		if err != nil {
-			log.Warn().Msgf("failed to read: %v", err)
-			return
-		}
-		readCh <- p
+func (n *BalancedUDPConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	res := <-n.readCh
+	if len(b) < len(res.buf) {
+		return 0, nil, io.ErrShortBuffer
 	}
-}
-
-func readRTCPLoop(conn *rtpnet.CCWrapper, readCh chan []rtcp.Packet) {
-	for {
-		pkts, err := conn.ReadRTCP()
-		if err != nil {
-			log.Warn().Msgf("failed to read: %v", err)
-			return
-		}
-		readCh <- pkts
-	}
-}
-
-// ReadRTP reads from the read channel.
-func (n *BalancedUDPConn) ReadRTP() (*rtp.Packet, error) {
-	p, ok := <-n.readRTPCh
-	if !ok {
-		return nil, io.EOF
-	}
-	return p, nil
-}
-
-// ReadRTCP reads an RTCP packet.
-func (n *BalancedUDPConn) ReadRTCP() ([]rtcp.Packet, error) {
-	p, ok := <-n.readRTCPCh
-	if !ok {
-		return nil, io.EOF
-	}
-	return p, nil
+	return len(res.buf), res.addr, nil
 }
 
 func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
@@ -197,26 +174,14 @@ func (n *BalancedUDPConn) randomConn() *rtpnet.CCWrapper {
 var errNoConnection = errors.New("no connection available")
 
 // WriteRTP writes an RTP packet.
-func (n *BalancedUDPConn) WriteRTP(p *rtp.Packet) error {
+func (n *BalancedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	n.RLock()
 	defer n.RUnlock()
 
 	if conn := n.randomConn(); conn != nil {
-		return conn.WriteRTP(p)
+		return conn.WriteTo(b, addr)
 	}
-	return errNoConnection
-}
-
-// WriteRTCP writes an RTCP packet.
-func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) error {
-	n.RLock()
-	defer n.RUnlock()
-
-	// forward RTCP packets go to *every* connection.
-	if conn := n.randomConn(); conn != nil {
-		return conn.WriteRTCP(pkts)
-	}
-	return errNoConnection
+	return 0, errNoConnection
 }
 
 // GetEstimatedBitrate gets the estimated bitrate of the sender.
@@ -238,7 +203,7 @@ func (n *BalancedUDPConn) GetEstimatedBitrate() (uint32, float64) {
 func (n *BalancedUDPConn) Close() error {
 	n.Lock()
 	defer n.Unlock()
-	close(n.readRTPCh)
+	close(n.readCh)
 	n.cancel()
 	for _, conn := range n.conns {
 		if err := conn.Close(); err != nil {
@@ -247,3 +212,50 @@ func (n *BalancedUDPConn) Close() error {
 	}
 	return nil
 }
+
+func (n *BalancedUDPConn) LocalAddr() net.Addr {
+	return n
+}
+
+func (n *BalancedUDPConn) Network() string {
+	return "udp"
+}
+
+func (n *BalancedUDPConn) String() string {
+	return "udp-cc-multicast"
+}
+
+func (n *BalancedUDPConn) SetDeadline(t time.Time) error {
+	n.Lock()
+	defer n.Unlock()
+
+	var err error
+	for _, conn := range n.conns {
+		err = multierr.Append(err, conn.SetDeadline(t))
+	}
+	return err
+}
+
+func (n *BalancedUDPConn) SetReadDeadline(t time.Time) error {
+	n.Lock()
+	defer n.Unlock()
+
+	var err error
+	for _, conn := range n.conns {
+		err = multierr.Append(err, conn.SetReadDeadline(t))
+	}
+	return err
+}
+
+func (n *BalancedUDPConn) SetWriteDeadline(t time.Time) error {
+	n.Lock()
+	defer n.Unlock()
+
+	var err error
+	for _, conn := range n.conns {
+		err = multierr.Append(err, conn.SetWriteDeadline(t))
+	}
+	return err
+}
+
+var _ net.PacketConn = (*BalancedUDPConn)(nil)

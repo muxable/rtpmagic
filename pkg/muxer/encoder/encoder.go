@@ -32,7 +32,7 @@ type Encoder struct {
 	closed bool
 }
 
-func NewEncoder(cname string) (*Encoder, error) {
+func NewEncoder() (*Encoder, error) {
 	pipeline := C.gst_pipeline_new(nil)
 
 	if C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING) == C.GST_STATE_CHANGE_FAILURE {

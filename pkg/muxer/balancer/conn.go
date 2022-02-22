@@ -47,8 +47,8 @@ func NewUDPConnWithErrorHandler(conn *net.UDPConn, onError func(error)) *UDPConn
 	return c
 }
 
-func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
-	n, err := c.UDPConn.Write(b)
+func (c *UDPConnWithErrorHandler) WriteTo(b []byte, addr net.Addr) (int, error) {
+	n, err := c.UDPConn.WriteTo(b, addr)
 	if err != nil {
 		c.errorOnce.Do(func() {
 			go c.onError(err)
@@ -57,18 +57,20 @@ func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
-	n, err := c.UDPConn.Read(b)
+func (c *UDPConnWithErrorHandler) ReadFrom(b []byte) (int, net.Addr, error) {
+	n, addr, err := c.UDPConn.ReadFrom(b)
 	if err != nil {
 		c.errorOnce.Do(func() {
 			go c.onError(err)
 		})
 	}
 	c.lastReceived = time.Now()
-	return n, err
+	return n, addr, err
 }
 
 func (c *UDPConnWithErrorHandler) Close() error {
 	c.cancel()
 	return c.UDPConn.Close()
 }
+
+var _ net.PacketConn = (*UDPConnWithErrorHandler)(nil)
