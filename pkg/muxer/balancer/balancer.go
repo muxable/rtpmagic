@@ -79,7 +79,7 @@ func (n *BalancedUDPConn) bindLocalAddresses(addr *net.UDPAddr) error {
 				log.Warn().Msgf("failed to connect to %s: %v", addr, err)
 				continue
 			}
-			wrapped := rtpnet.NewCCWrapper(NewUDPConnWithErrorHandler(
+			wrapped := rtpnet.NewCCWrapper(NewConnWithErrorHandler(
 				conn,
 				func(err error) {
 					n.Lock()
@@ -212,7 +212,6 @@ func (n *BalancedUDPConn) WriteRTCP(pkts []rtcp.Packet) error {
 	n.RLock()
 	defer n.RUnlock()
 
-	// forward RTCP packets go to *every* connection.
 	if conn := n.randomConn(); conn != nil {
 		return conn.WriteRTCP(pkts)
 	}

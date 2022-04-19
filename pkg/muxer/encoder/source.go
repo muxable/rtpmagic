@@ -36,6 +36,11 @@ type Source struct {
 	ssrc    webrtc.SSRC
 }
 
+var (
+	csink = C.CString("sink")
+	cclockrate = C.CString("clock-rate")
+)
+
 // CreatePipeline creates a GStreamer Pipeline
 func (e *Encoder) AddSource(source string, codec *packets.Codec) (*Source, error) {
 	p, err := NewPipelineConfiguration(source, codec.MimeType)
@@ -66,9 +71,6 @@ func (e *Encoder) AddSource(source string, codec *packets.Codec) (*Source, error
 	}
 
 	bin := (*C.GstBin)(unsafe.Pointer(element))
-
-	csink := C.CString("sink")
-	defer C.free(unsafe.Pointer(csink))
 
 	sink := C.gst_bin_get_by_name(bin, csink)
 
@@ -184,5 +186,25 @@ func (s *Source) ReadRTP() (*rtp.Packet, error) {
 	if err := pkt.Unmarshal(C.GoBytes(unsafe.Pointer(copy), C.int(size))); err != nil {
 		return nil, err
 	}
+	// gstreamer by default uses the pts for timestamp. this is kind of terrible, we use dts.
+	pad := C.gst_element_get_static_pad((*C.GstElement)(unsafe.Pointer(s.sink)), csink)
+	if pad == nil {
+		return nil, errors.New("failed to get src pad")
+	}
+	caps := C.gst_pad_get_current_caps(pad)
+	if caps == nil {
+		return nil, errors.New("failed to get caps")
+	}
+	defer C.gst_caps_unref(caps)
+
+	structure := C.gst_caps_get_structure(caps, C.guint(0))
+
+	var clockrate C.int
+	if C.gst_structure_get_int(structure, cclockrate, &clockrate) == C.gboolean(0) {
+		return nil, errors.New("failed to get clock rate")
+	}
+	dts := cbuf.dts
+	ts := uint32(float64(dts) * float64(clockrate) / float64(time.Second))
+	pkt.Timestamp = ts
 	return pkt, nil
 }

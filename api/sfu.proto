@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/muxable/sfu/api";
+
+package api;
+
+service SFU {
+  rpc Signal(stream google.protobuf.Any) returns (stream google.protobuf.Any) {}
+}

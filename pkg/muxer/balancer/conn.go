@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-type UDPConnWithErrorHandler struct {
-	*net.UDPConn
+type ConnWithErrorHandler struct {
+	net.Conn
 
 	onError   func(error)
 	errorOnce sync.Once
@@ -20,10 +20,10 @@ type UDPConnWithErrorHandler struct {
 
 var errConnectionTimeout = errors.New("connection timeout")
 
-func NewUDPConnWithErrorHandler(conn *net.UDPConn, onError func(error)) *UDPConnWithErrorHandler {
+func NewConnWithErrorHandler(conn net.Conn, onError func(error)) *ConnWithErrorHandler {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &UDPConnWithErrorHandler{
-		UDPConn:      conn,
+	c := &ConnWithErrorHandler{
+		Conn:      conn,
 		onError:      onError,
 		lastReceived: time.Now(),
 		cancel:       cancel,
@@ -47,8 +47,8 @@ func NewUDPConnWithErrorHandler(conn *net.UDPConn, onError func(error)) *UDPConn
 	return c
 }
 
-func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
-	n, err := c.UDPConn.Write(b)
+func (c *ConnWithErrorHandler) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
 	if err != nil {
 		c.errorOnce.Do(func() {
 			go c.onError(err)
@@ -57,8 +57,8 @@ func (c *UDPConnWithErrorHandler) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
-	n, err := c.UDPConn.Read(b)
+func (c *ConnWithErrorHandler) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
 	if err != nil {
 		c.errorOnce.Do(func() {
 			go c.onError(err)
@@ -68,7 +68,7 @@ func (c *UDPConnWithErrorHandler) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *UDPConnWithErrorHandler) Close() error {
+func (c *ConnWithErrorHandler) Close() error {
 	c.cancel()
-	return c.UDPConn.Close()
+	return c.Conn.Close()
 }

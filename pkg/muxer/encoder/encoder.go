@@ -57,13 +57,13 @@ func NewEncoder(cname string) (*Encoder, error) {
 
 	go C.g_main_loop_run(loop)
 
-	runtime.SetFinalizer(s, func(Encoder *Encoder) {
-		if err := Encoder.Close(); err != nil {
+	runtime.SetFinalizer(s, func(e *Encoder) {
+		if err := e.Close(); err != nil {
 			zap.L().Error("failed to close Encoder", zap.Error(err))
 		}
-		C.gst_object_unref(C.gpointer(unsafe.Pointer(Encoder.bin)))
-		C.g_main_loop_unref(Encoder.loop)
-		C.g_main_context_unref(Encoder.ctx)
+		C.gst_object_unref(C.gpointer(unsafe.Pointer(e.bin)))
+		C.g_main_loop_unref(e.loop)
+		C.g_main_context_unref(e.ctx)
 	})
 
 	return s, nil

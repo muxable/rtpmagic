@@ -1,0 +1,220 @@
+package main
+
+import (
+	"io"
+	"log"
+	"math"
+
+	"github.com/muxable/bluetooth/pkg/hci"
+	"github.com/muxable/bluetooth/pkg/l2cap"
+	"github.com/muxable/rtpmagic/api"
+	"github.com/muxable/rtpmagic/pkg/control"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+)
+
+func main() {
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+	undo := zap.ReplaceGlobals(logger)
+	defer undo()
+
+	sck, err := hci.NewSocket(0)
+	if err != nil {
+		panic(err)
+	}
+
+	a := hci.NewConn(sck)
+
+	if err := a.Reset(); err != nil {
+		panic(err)
+	}
+
+	addr, err := a.ReadBDAddr()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("got bdaddr %x", addr)
+
+	if err := a.ClearFilterAcceptList(); err != nil {
+		panic(err)
+	}
+
+	n, err := a.ReadFilterAcceptListSize()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("got filter accept list size %v", n)
+
+	if err := a.SetEventMask(
+		hci.EventMaskDisconnectionCompleteEvent |
+			hci.EventMaskEncryptionChangeEvent |
+			hci.EventMaskHardwareErrorEvent |
+			hci.EventMaskEncryptionKeyRefreshCompleteEvent |
+			hci.EventMaskLEMetaEvent); err != nil {
+		panic(err)
+	}
+
+	if err := a.LESetEventMask(
+		hci.LEEventMaskConnectionCompleteEvent |
+			hci.LEEventMaskAdvertisingReportEvent |
+			hci.LEEventMaskConnectionUpdateCompleteEvent |
+			hci.LEEventMaskLongTermKeyRequestEvent |
+			hci.LEEventMaskReadRemoteUsedFeaturesCompleteEvent); err != nil {
+		panic(err)
+	}
+
+	bs, err := a.LEReadBufferSize()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("got buffer size %v", bs)
+
+	ss, err := a.LEReadSupportedStates()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("got supported states %v", ss)
+
+	if err := a.SetAdvertisingData(
+		hci.FlagsDataTypeLEGeneralDiscoverableMode|hci.FlagsDataTypeBREDRNotSupported,
+		hci.CompleteLocalName("Muxer")); err != nil {
+		panic(err)
+	}
+
+	if err := a.LESetAdvertisingParameters(&hci.SetAdvertisingParametersRequest{
+		AdvertisingIntervalMin: 100,
+		AdvertisingIntervalMax: 120,
+	}); err != nil {
+		panic(err)
+	}
+
+	for {
+		if err := a.LESetAdvertisingEnable(true); err != nil {
+			panic(err)
+		}
+
+		conn, err := a.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		go func() {
+			l2capconn := l2cap.NewConn(conn)
+			for {
+				signal, err := l2capconn.Accept()
+				if err != nil {
+					panic(err)
+				}
+				switch signal.PSM {
+				case 0x0081:
+					// wifi scan request
+					channel, err := signal.Approve(false, math.MaxUint16)
+					if err != nil {
+						panic(err)
+					}
+
+					go func() {
+						state, err := control.NetScan()
+						if err != nil {
+							panic(err)
+						}
+						buf, err := proto.Marshal(state)
+						if err != nil {
+							panic(err)
+						}
+						if _, err := channel.Write(buf); err != nil {
+							panic(err)
+						}
+					}()
+					go io.Copy(io.Discard, channel)
+				case 0x0082:
+						log.Printf("connect to wifi request")
+					// connect to wifi request
+					channel, err := signal.Approve(false, math.MaxUint16)
+					if err != nil {
+						panic(err)
+					}
+
+					go func() {
+						inbuf := make([]byte, math.MaxUint16)
+						n, err := channel.Read(inbuf)
+						if err != nil {
+							panic(err)
+						}
+
+						log.Printf("got buffer %x", inbuf[:n])
+
+						go io.Copy(io.Discard, channel)
+
+						req := &api.WifiConnectRequest{}
+						if err := proto.Unmarshal(inbuf[:n], req); err != nil {
+							buf, err := proto.Marshal(&api.WifiConnectResponse{Error: err.Error()})
+							if err != nil {
+								panic(err)
+							}
+							if _, err := channel.Write(buf); err != nil {
+								panic(err)
+							}
+							return
+						}
+						if err := control.NetConnect(req); err != nil {
+							buf, err := proto.Marshal(&api.WifiConnectResponse{Error: err.Error()})
+							if err != nil {
+								panic(err)
+							}
+							if _, err := channel.Write(buf); err != nil {
+								panic(err)
+							}
+							return
+						}
+						state, err := control.NetScan()
+						if err != nil {
+							panic(err)
+						}
+						outbuf, err := proto.Marshal(&api.WifiConnectResponse{WifiState: state})
+						if err != nil {
+							panic(err)
+						}
+						if _, err := channel.Write(outbuf); err != nil {
+							panic(err)
+						}
+					}()
+
+				case 0x0083:
+					// video devices list request
+					channel, err := signal.Approve(false, math.MaxUint16)
+					if err != nil {
+						panic(err)
+					}
+
+					go func() {
+						state, err := control.NetScan()
+						if err != nil {
+							panic(err)
+						}
+						buf, err := proto.Marshal(state)
+						if err != nil {
+							panic(err)
+						}
+						if _, err := channel.Write(buf); err != nil {
+							panic(err)
+						}
+					}()
+					go io.Copy(io.Discard, channel)
+				default:
+					if err := signal.Reject(l2cap.LECreditBasedConnectionResultRefusedSPSMNotSupported); err != nil {
+						panic(err)
+					}
+				}
+			}
+		}()
+	}
+}

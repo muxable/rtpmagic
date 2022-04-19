@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+option go_package = "github.com/muxable/rtpmagic/api";
+
+package api;
+
+// this is like, ghetto grpc.
+
+message WifiConnectRequest {
+    string interface_id = 1;
+    string bssid = 2;
+    string password = 3;
+    // if set, the wifi will broadcast this SSID as an access point. BSSID will be ignored.
+    string ap_mode_ssid = 4;
+    bool autoconnect = 5;
+}
+
+message WifiConnectResponse {
+    string error = 1;
+    WifiState wifi_state = 2;
+}
+
+message WifiState {
+    message AccessPoint {
+        string ssid = 1;
+        string bssid = 2;
+        double signal_strength = 3;
+        string security = 4;
+    }
+
+    message Interface {
+        enum Type {
+            UNKNOWN = 0;
+            WIFI = 1;
+            ETHERNET = 2;
+            AP = 3;
+        }
+
+        string id = 1;
+        Type type = 2;
+
+        // these fields only set if type == WIFI
+        string connected_access_point_ssid = 3;
+        repeated AccessPoint discovered_access_points = 4;
+        bool autoconnect = 5;
+    }
+
+    repeated Interface interfaces = 1;
+}
+
+message VideoInputDevice {
+    string id = 1;
+    string name = 2;
+}
+
+message AudioInputDevice {
+    string id = 1;
+    string name = 2;
+}
+
+message DeviceState {
+    repeated VideoInputDevice video_input_devices = 1;
+    repeated AudioInputDevice audio_input_devices = 2;
+}
