@@ -16,16 +16,14 @@ type SendBuffer struct {
 
 	packets    []*rtp.Packet
 	timestamps []*time.Time
-	size       uint16
 	lastAdded  uint16
 	started    bool
 }
 
 func NewSendBuffer(size uint16) *SendBuffer {
 	return &SendBuffer{
-		packets:    make([]*rtp.Packet, 1<<size),
-		timestamps: make([]*time.Time, 1<<size),
-		size:       1 << size,
+		packets:    make([]*rtp.Packet, 1<<16),
+		timestamps: make([]*time.Time, 1<<16),
 	}
 }
 
@@ -34,8 +32,8 @@ func (s *SendBuffer) Add(seq uint16, ts time.Time, packet *rtp.Packet) {
 	defer s.Unlock()
 
 	if !s.started {
-		s.packets[seq%s.size] = packet
-		s.timestamps[seq%s.size] = &ts
+		s.packets[seq] = packet
+		s.timestamps[seq] = &ts
 		s.lastAdded = seq
 		s.started = true
 		return
@@ -46,13 +44,13 @@ func (s *SendBuffer) Add(seq uint16, ts time.Time, packet *rtp.Packet) {
 		return
 	} else if diff < uint16SizeHalf {
 		for i := s.lastAdded + 1; i != seq; i++ {
-			s.packets[i%s.size] = nil
-			s.timestamps[i%s.size] = nil
+			s.packets[i] = nil
+			s.timestamps[i] = nil
 		}
 	}
 
-	s.packets[seq%s.size] = packet
-	s.timestamps[seq%s.size] = &ts
+	s.packets[seq] = packet
+	s.timestamps[seq] = &ts
 	s.lastAdded = seq
 }
 
@@ -65,9 +63,10 @@ func (s *SendBuffer) Get(seq uint16) (*time.Time, *rtp.Packet) {
 		return nil, nil
 	}
 
-	if diff >= s.size {
+	p := s.packets[seq]
+	if p.SequenceNumber != seq {
 		return nil, nil
 	}
 
-	return s.timestamps[seq%s.size], s.packets[seq%s.size]
+	return s.timestamps[seq], p
 }

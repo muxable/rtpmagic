@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -38,7 +39,7 @@ func GetLocalAddresses() (map[string]*net.UDPAddr, error) {
 	return names, nil
 }
 
-func DialVia(to *net.UDPAddr, via string) (net.Conn, error) {
+func DialVia(to *net.UDPAddr, via string) (net.PacketConn, error) {
 	sfd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
 		return nil, err
@@ -51,8 +52,31 @@ func DialVia(to *net.UDPAddr, via string) (net.Conn, error) {
 	if err := syscall.Connect(sfd, sa); err != nil {
 		return nil, err
 	}
+	if err := syscall.SetsockoptInt(sfd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, 65536); err != nil {
+		return nil, err
+	}
 	file := os.NewFile(uintptr(sfd), via)
-	conn, err := net.FileConn(file)
+	conn, err := net.FilePacketConn(file)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func ListenVia(via string) (net.PacketConn, error) {
+	sfd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.BindToDevice(sfd, via); err != nil {
+		return nil, err
+	}
+	if err := syscall.Bind(sfd, &syscall.SockaddrInet4{}); err != nil {
+		return nil, fmt.Errorf("failed to listen: %w", err)
+	}
+	file := os.NewFile(uintptr(sfd), via)
+	conn, err := net.FilePacketConn(file)
 	if err != nil {
 		file.Close()
 		return nil, err

@@ -62,3 +62,20 @@ message DeviceState {
     repeated VideoInputDevice video_input_devices = 1;
     repeated AudioInputDevice audio_input_devices = 2;
 }
+
+message MonitoringState {
+    enum Model {
+        UNKNOWN = 0;
+        M0100 = 1;
+    }
+
+    Model model = 1;  // used for backwards compatibility.
+
+    string raw_stats_payload = 2;  // used for debugging/remote metrics.
+
+    double temperature_celsius = 3;
+    double cpu_usage_percent = 4;
+    double memory_usage_bytes = 5;
+    double input_voltage = 6;
+    double input_current_amperes = 7;
+}
